@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- The hook lists launchable apps so the user can pick targets. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
+    <application
+        android:label="@string/app_name"
+        android:largeHeap="true"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.BeatriceLite">
+
+        <!-- The QNN HTP stub loads these vendor libs from /vendor/lib64; without
+             the declaration the app linker namespace (clns-*) refuses the dlopen
+             and QnnDevice_create dies with "library not found in namespace". -->
+        <uses-native-library android:name="libcdsprpc.so" android:required="false" />
+        <uses-native-library android:name="libvndksupport.so" android:required="false" />
+        <uses-native-library android:name="libadsprpc.so" android:required="false" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:theme="@style/Theme.BeatriceLite">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".LiveService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
+        <!-- Exported on purpose: the Xposed module runs as the hooked app's uid
+             and has no other way to reach our engine. -->
+        <provider
+            android:name=".hook.HookProvider"
+            android:authorities="${applicationId}.provider"
+            android:exported="true"
+            android:enabled="true"
+            android:grantUriPermissions="false" />
+
+        <meta-data android:name="xposedmodule" android:value="true" />
+        <meta-data android:name="xposeddescription" android:value="@string/xposed_description" />
+        <meta-data android:name="xposedminversion" android:value="93" />
+
+    </application>
+
+</manifest>

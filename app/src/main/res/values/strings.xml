@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Beatrice Lite</string>
+    <string name="xposed_description">Routes another app\'s microphone through the Beatrice engine (rc.0 / RVC) running in this app.</string>
+
+    <string name="hero_title">Beatrice</string>
+    <string name="hero_idle">Bring the model in, pick a voice, then speak or drop a clip.</string>
+    <string name="model_title">Model</string>
+    <string name="model_none">No model loaded</string>
+    <string name="model_import">Import model folder</string>
+    <string name="model_hint">Select the folder that holds the .toml and the .bin files.</string>
+    <string name="model_loading">Loading model…</string>
+    <string name="voice_title">Voice</string>
+    <string name="input_title">Input</string>
+    <string name="input_pick">Pick audio</string>
+    <string name="input_none">No clip imported</string>
+    <string name="input_meta">%1$.1f s · %2$d Hz</string>
+    <string name="convert">Convert</string>
+    <string name="converting">Converting… %1$d%%</string>
+    <string name="output_title">Converted</string>
+    <string name="output_empty">The converted clip appears here.</string>
+    <string name="play">Play</string>
+    <string name="stop">Stop</string>
+    <string name="save">Save WAV</string>
+    <string name="saved">Saved to Music/Beatrice</string>
+    <string name="params_title">Voice controls</string>
+    <string name="pitch">Pitch</string>
+    <string name="formant">Formant</string>
+    <string name="intonation">Intonation</string>
+    <string name="correction">Pitch correction</string>
+    <string name="vq">VQ neighbours</string>
+    <string name="pitch_value">%1$+d st</string>
+    <string name="float_value">%1$.2f</string>
+    <string name="int_value">%1$d</string>
+    <string name="error_prefix">Error: %1$s</string>
+</resources>
