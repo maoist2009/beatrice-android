@@ -18,7 +18,7 @@ import kotlin.math.roundToInt
 class RvcProcessor(
     private val voiceName: String,
     override val outputRate: Int,
-    private val stepSamples: Int = 1600,
+    private val stepSamples: Int = 400,
 ) : LiveProcessor {
 
     companion object {
@@ -33,6 +33,12 @@ class RvcProcessor(
 
     override val outputSamples: Long get() = fed.toLong()
 
+    /**
+     * 25 ms steps: the native pipeline can only emit a block once it has
+     * 6720 samples (420 ms) of input, and it is polled at this granularity.
+     * 100 ms steps used to add up to a full step of delay to every block for
+     * no reason — the call is a cheap append when nothing is emittable.
+     */
     override val requiredSamples: Int get() = fed + stepSamples
 
     fun lastError(): String? = lastError

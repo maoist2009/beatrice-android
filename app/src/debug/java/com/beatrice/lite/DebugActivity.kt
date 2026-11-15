@@ -260,7 +260,22 @@ class DebugActivity : Activity() {
         val startedNanos = System.nanoTime()
         var calls = 0
 
-        fun send(samples: FloatArray) {
+        // Wall-clock latency: when a converted buffer comes back, the samples
+        // in it correspond one-to-one to input samples starting at [delivered].
+        // Compare "now" with the moment that input chunk was handed over.
+        val sendAt = ArrayList<LongArray>()   // (input offset, elapsedRealtime)
+        val latencies = ArrayList<Long>()
+        var delivered = 0
+        var cursor = 0
+
+        fun sentAt(index: Int): Long {
+            while (cursor + 1 < sendAt.size && sendAt[cursor + 1][0] <= index) cursor++
+            val e = sendAt.getOrNull(cursor) ?: return -1
+            return if (e[0] <= index) e[1] else -1
+        }
+
+        fun send(samples: FloatArray, offset: Int) {
+            sendAt.add(longArrayOf(offset.toLong(), SystemClock.elapsedRealtime()))
             val b = Bundle().apply {
                 putString("key", "debug|$clientRate")
                 putString("pkg", "debug")
@@ -269,13 +284,21 @@ class DebugActivity : Activity() {
                 putFloatArray("pcm", samples)
             }
             val reply = com.beatrice.lite.hook.HookBridge.processCall(b)
-            reply.getFloatArray("pcm")?.let { collected.add(it) }
+            reply.getFloatArray("pcm")?.let { part ->
+                // Sample 0 of the converted stream is the capture sample the
+                // session started from, not the first chunk we ever sent.
+                val base = com.beatrice.lite.hook.HookBridge.lastBaseSamples * clientRate / 16_000
+                val t = sentAt((base + delivered).toInt())
+                if (t > 0) latencies.add(SystemClock.elapsedRealtime() - t)
+                collected.add(part)
+                delivered += part.size
+            }
             calls++
         }
 
         while (off < client.size) {
             val n = minOf(chunk, client.size - off)
-            send(client.copyOfRange(off, off + n))
+            send(client.copyOfRange(off, off + n), off)
             off += n
             // The real AudioRecord is clocked by hardware, so the harness must
             // not drift: sleep most of the gap, then spin the last millisecond.
@@ -290,7 +313,8 @@ class DebugActivity : Activity() {
         // input, so push a second of silence.
         val silence = FloatArray(chunk)
         for (i in 0 until clientRate / chunk) {
-            send(silence)
+            send(silence, off)
+            off += chunk
             Thread.sleep(chunk * 1000L / clientRate)
         }
 
@@ -310,13 +334,26 @@ class DebugActivity : Activity() {
         }
         show(
             "hook returned ${out.size} samples (${"%.2f".format(out.size.toDouble() / clientRate)} s) " +
-                "in ${SystemClock.elapsedRealtime() - started} ms, calls=$calls",
+                "in ${SystemClock.elapsedRealtime() - started} ms, calls=$calls " +
+                "base=${com.beatrice.lite.hook.HookBridge.lastBaseSamples} samples",
         )
+        if (latencies.isNotEmpty()) {
+            val s = latencies.sorted()
+            val tail = latencies.subList(latencies.size * 2 / 3, latencies.size).sorted()
+            show(
+                "hook latency: first=${s.first()} ms, p50=${s[s.size / 2]} ms, " +
+                    "p95=${s[(s.size * 95) / 100]} ms, max=${s.last()} ms (n=${s.size}) " +
+                    "| steady p50=${tail[tail.size / 2]} ms",
+            )
+        }
+        if (engine is com.beatrice.lite.engine.rvc.RvcProcessor) {
+            android.util.Log.i("BeatriceDbg", "stats: " + RvcJni.pipelineStats().take(400))
+        }
         if (total > 0) {
             show("hook rms=${"%.4f".format(rms(out))} peak=${"%.4f".format(peak(out))}")
         if (engine is com.beatrice.lite.engine.rvc.RvcProcessor) {
             val stats = com.beatrice.lite.engine.rvc.RvcStats.parse(RvcJni.pipelineStats())
-            if (stats != null) show("native RTF ${"%.3f".format(stats.rtf)} blocks=${stats.blocks} ms=${stats.msTotal}")
+            if (stats != null) show("native RTF ${"%.3f".format(stats.rtf)} blocks=${stats.blocks} ms=${stats.msTotal} ${stats.breakdown}")
         }
             val ref = engine.convert(AudioIO.resample(client, clientRate, 16_000))
             val refAt = AudioIO.resample(ref, engine.outputRate, clientRate)

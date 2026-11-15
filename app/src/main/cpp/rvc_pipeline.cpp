@@ -1107,6 +1107,27 @@ static c0_chunk_t *stream_find_chunk(rvc_pipeline_t *p, size_t c) {
   return nullptr;
 }
 
+/* Submit one rmvpe window.  Kept separate from stream_prep_block so the feed
+ * loop can start it the moment the window's own 320 ms of audio has arrived:
+ * a block needs 2-3 windows and only the last one is gated by the block's
+ * look-ahead, so the earlier ones overlap that wait instead of piling up in
+ * front of the emit.  Each window is 100 ms apart, so this is worth 100-200 ms
+ * of the block's compute time. */
+static void stream_submit_f0_window(rvc_pipeline_t *p, size_t w) {
+  size_t s = w * (size_t)F0_CTX_HOP;
+  float win[F0_WIN];
+  for (size_t k = 0; k < (size_t)F0_WIN; k++) win[k] = hp_at(p, s + k);
+  float mel[32 * 128];
+  rvc_mel_128x32(&p->dsp, win, F0_WIN, mel);
+  float *g_in = p->mel_pool.acquire(p, (size_t)(128 * 32));
+  mel_to_graph(mel, g_in);
+  auto job = npu_make(G_RMVPE, {"mel_128x32"}, {RVC_QNN_FLOAT32}, {g_in},
+                      {(size_t)(128 * 32)}, &p->st_f0);
+  p->f0_job_tickets.push_back(npu_submit(p, job));
+  p->mel_pool.submitted(p->f0_job_tickets.back());
+  p->f0_windows++;
+}
+
 /* PREP (runs ahead of the emitting block, on the feeding thread): submit the
  * rmvpe windows block j needs and refresh any conv0 chunk whose input has
  * grown past what it currently reflects.  Nothing is collected here — the
@@ -1116,21 +1137,7 @@ static int stream_prep_block(rvc_pipeline_t *p, int j) {
   size_t need_w = (g >= 10) ? g / 10 - 1 : 0;
   stream_highpass(p, j);
 
-  while (p->f0_windows <= need_w) {
-    size_t w = p->f0_windows;
-    size_t s = w * (size_t)F0_CTX_HOP;
-    float win[F0_WIN];
-    for (size_t k = 0; k < (size_t)F0_WIN; k++) win[k] = hp_at(p, s + k);
-    float mel[32 * 128];
-    rvc_mel_128x32(&p->dsp, win, F0_WIN, mel);
-    float *g_in = p->mel_pool.acquire(p, (size_t)(128 * 32));
-    mel_to_graph(mel, g_in);
-    auto job = npu_make(G_RMVPE, {"mel_128x32"}, {RVC_QNN_FLOAT32}, {g_in},
-                        {(size_t)(128 * 32)}, &p->st_f0);
-    p->f0_job_tickets.push_back(npu_submit(p, job));
-    p->mel_pool.submitted(p->f0_job_tickets.back());
-    p->f0_windows++;
-  }
+  while (p->f0_windows <= need_w) stream_submit_f0_window(p, p->f0_windows);
 
   size_t col0 = (size_t)j * (size_t)HUBERT_CTX_T1_HOP;
   size_t col1 = col0 + (size_t)HUBERT_T1_LEN;
@@ -1869,9 +1876,14 @@ int rvc_pipeline_start_stream(rvc_pipeline_t *p) {
 
   /* Tickets stay monotonic across restarts: a job left in flight from the
    * previous stream still increments q_done, and rewinding the counters here
-   * would make every later wait compare against the wrong ticket. */
+   * would make every later wait compare against the wrong ticket.  Pending
+   * jobs must therefore be *drained*, not dropped: q_done only reaches a
+   * ticket once that job has run, so clearing the queue here would leave a
+   * permanent gap and any npu_wait for a ticket past it would hang. */
   {
-    std::lock_guard<std::mutex> lk(p->qmu);
+    std::unique_lock<std::mutex> lk(p->qmu);
+    uint64_t last = p->q_next;
+    p->qcv_done.wait(lk, [p, last] { return p->q_done >= last; });
     p->q_stop = false;
     p->q_fail = false;
     p->q_err.clear();
@@ -1906,6 +1918,22 @@ long rvc_pipeline_feed_stream(rvc_pipeline_t *p, const float *x, size_t n,
   }
 
   for (;;) {
+    /* RMVPE windows: start each one as soon as its own 320 ms of audio is in.
+     * The per-block gate below only fires once the block's *last* window has
+     * arrived, which is up to two windows (200 ms) later; starting early lets
+     * that NPU work hide inside the look-ahead instead of adding to it. */
+    {
+      size_t gw = (size_t)(p->next_block + PREP_AHEAD) * (size_t)CTX_STRIDE +
+                  (size_t)p->voice.t_ph - 1;
+      size_t need_w = (gw >= 10) ? gw / 10 - 1 : 0;
+      while (p->f0_windows <= need_w) {
+        size_t w = p->f0_windows;
+        if (p->sig.size() < (size_t)F0_CTX_HOP * w + (size_t)F0_WIN) break;
+        stream_highpass(p, p->next_block);
+        stream_submit_f0_window(p, w);
+      }
+    }
+
     /* PREP: submit the NPU work for every block whose input has arrived, up
      * to PREP_AHEAD past the one being emitted.  Topping up inside the output
      * loop (not once per feed) is what keeps the worker's queue from draining

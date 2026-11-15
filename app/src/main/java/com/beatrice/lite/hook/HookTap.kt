@@ -55,7 +55,9 @@ class HookTap(
         while (running) {
             val chunk = synchronized(sendLock) { send.take(MAX_CHUNK) }
             if (chunk.isEmpty()) {
-                Thread.sleep(5)
+                // 2 ms: the audio thread just handed us a buffer, so a longer
+                // nap only adds latency to the binder round trip.
+                Thread.sleep(2)
                 continue
             }
             val out = HookRemote.process(key, pkg, rate, channels, chunk)

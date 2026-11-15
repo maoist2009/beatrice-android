@@ -40,6 +40,10 @@ object HookBridge {
     @Volatile var lastAt = 0L
         private set
 
+    /** Capture samples the current stream starts from (debug timing aid). */
+    @Volatile var lastBaseSamples = 0L
+        private set
+
     val delivered: Long get() = counts.values.sum()
 
     fun deliveredFor(pkg: String): Long = counts[pkg] ?: 0L
@@ -66,7 +70,9 @@ object HookBridge {
 
     /** Latency of the stream that currently owns the engine, or null when idle. */
     fun stats(): HookStats? {
-        val key = synchronized(ownerLock) { owner } ?: return null
+        val key = synchronized(ownerLock) { owner }
+            ?: sessions.keys.firstOrNull()
+            ?: return null
         return sessions[key]?.stats()
     }
 
@@ -114,6 +120,7 @@ object HookBridge {
                 fresh
             }
         }
+        lastBaseSamples = session.baseSamples()
         val out = session.exchange(pcm)
         if (out.isEmpty()) return Bundle()
         lastPkg = pkg
