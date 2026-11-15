@@ -9,6 +9,23 @@ import com.beatrice.lite.engine.PcmSource
 import kotlin.math.max
 
 /**
+ * What the UI shows for a live hooked stream.
+ *
+ * [lookaheadMs] is how much input the backend still needs before it can emit
+ * the next block; [queueMs] is converted audio already waiting to be handed
+ * back to the target app. Their sum is the delay this session adds on top of
+ * the target's own capture/playback buffering.
+ */
+data class HookStats(
+    val lookaheadMs: Int,
+    val queueMs: Int,
+    val inferMs: Double,
+    val primeMs: Int,
+) {
+    val totalMs: Int get() = lookaheadMs + queueMs
+}
+
+/**
  * One hooked audio stream: a target app's microphone at a fixed format,
  * converted by the resident engine.
  *
@@ -49,7 +66,7 @@ class HookSession(
      * the block rate. Priming past one block keeps the queue non-empty.
      */
     @Volatile private var blockMs = 0
-    @Volatile private var primeMs = 450
+    @Volatile private var primeMs = 300
     private val primeSamples: Int get() = rate * primeMs / 1000
     private var primed = false
 
@@ -81,6 +98,18 @@ class HookSession(
 
     fun isActive(): Boolean = System.currentTimeMillis() - lastUse < 3_000
 
+    /** Cheap snapshot for the UI: no locks on the audio path, one read per second. */
+    fun stats(): HookStats {
+        val queued = synchronized(outLock) { fifo.size }
+        val pending = engine?.let { it.requiredSamples - it.outputSamples } ?: 0L
+        return HookStats(
+            lookaheadMs = (pending.coerceAtLeast(0L) * 1000 / 16_000).toInt(),
+            queueMs = queued * 1000 / rate.coerceAtLeast(1),
+            inferMs = lastInferMs,
+            primeMs = primeMs,
+        )
+    }
+
     fun setParams(params: EngineParams) {
         pendingParams = params
     }
@@ -111,9 +140,23 @@ class HookSession(
                     Log.d(TAG, "primed with ${fifo.size} frames")
                 } else {
                     // Keep the backlog bounded even if the app stops reading.
-                    if (fifo.size > primeSamples * 2) fifo.dropOldest(fifo.size - primeSamples)
+                    // The high-water mark is one prime plus one block: letting
+                    // it creep to 2x prime (measured: 1 s) adds delay that the
+                    // stream never gives back, because the queue is sticky.
+                    val high = primeSamples + (rate * blockMs / 1000).coerceAtLeast(rate / 20)
+                    if (fifo.size > high) {
+                        Log.d(TAG, "trim queue ${fifo.size} -> $primeSamples")
+                        fifo.dropOldest(fifo.size - primeSamples)
+                    }
                     return FloatArray(0)
                 }
+            }
+            // Running above the high-water mark (backlog left over from engine
+            // start): shave a few ms per call instead of dropping a whole
+            // block, so the delay converges back to prime without a jump.
+            val high = primeSamples + (rate * blockMs / 1000).coerceAtLeast(rate / 20)
+            if (fifo.size > high) {
+                fifo.dropOldest(minOf(fifo.size - primeSamples, rate / 200))
             }
             val ready = fifo.read(pcm.size)
             if (ready == null) {
@@ -196,7 +239,12 @@ class HookSession(
                 val ms = out.size * 1000 / rate
                 if (ms > blockMs) {
                     blockMs = ms
-                    primeMs = (ms * 2).coerceIn(300, 800)
+                    // 1.6 blocks: the native pipeline emits 250 ms per 250-300 ms
+                    // of input, so the queue only has to survive one gap. Two
+                    // blocks (the old value) measured ~1 s of added delay.
+                    // rc.0 emits a regular 120 ms block, so it only needs a
+                    // quarter second of cushion.
+                    primeMs = (ms * 8 / 5).coerceIn(250, 800)
                 }
                 Log.d(TAG, "block in=${part.audio.size} out=${out.size} fed=${processor.outputSamples} fifo=${fifo.size} prime=${primeSamples} infer=${"%.1f".format(lastInferMs)}ms")
                 if (out.isNotEmpty()) synchronized(outLock) { fifo.write(out) }
@@ -233,8 +281,10 @@ class HookSession(
             // The warm-up ran while the app was already being heard, so the
             // ring holds real audio whose absolute indices no longer match the
             // fresh processor. Slide the newest samples down to index 0
-            // instead of throwing them away.
-            val keep = minOf(received, ring.size.toLong()).toInt()
+            // instead of throwing them away — but cap it at one second: a
+            // longer backlog would be converted as fast as the engine can,
+            // and every extra sample ends up as permanent queue delay.
+            val keep = minOf(received, 8_000L).toInt()
             if (keep > 0) {
                 val tail = FloatArray(keep)
                 for (k in 0 until keep) {

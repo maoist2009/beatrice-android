@@ -80,6 +80,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.beatrice.lite.engine.Backend
 import kotlin.math.roundToInt
 
 private val LightScheme = lightColorScheme(
@@ -205,6 +206,8 @@ private fun BeatriceScreen(vm: MainViewModel = viewModel()) {
                 state = state,
                 onImport = { folderPicker.launch(null) },
             )
+
+            EngineCard(state, vm)
 
             HookCard(state, vm)
 
@@ -397,6 +400,35 @@ private fun ModelCard(state: MainViewModel.UiState, onImport: () -> Unit) {
 }
 
 @Composable
+private fun EngineCard(state: MainViewModel.UiState, vm: MainViewModel) {
+    // Only worth showing when both backends have their files installed.
+    if (!state.hasBeatrice || !state.hasRvc) return
+    SectionCard(title = "Engine") {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = state.backend == Backend.BEATRICE,
+                onClick = { vm.setBackend(Backend.BEATRICE) },
+                enabled = !state.busy && !state.live,
+                label = { Text("Beatrice · CPU") },
+            )
+            FilterChip(
+                selected = state.backend == Backend.RVC,
+                onClick = { vm.setBackend(Backend.RVC) },
+                enabled = !state.busy && !state.live,
+                label = { Text("RVC · NPU") },
+            )
+        }
+        Text(
+            text = "One backend is resident at a time. Beatrice needs no voice pack and " +
+                "runs on the CPU; RVC uses the Hexagon NPU and the voice packs you imported. " +
+                "Switching reloads the engine (about a second).",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
 private fun HookCard(state: MainViewModel.UiState, vm: MainViewModel) {
     var showTargets by remember { mutableStateOf(false) }
     SectionCard(title = "Use in other apps") {
@@ -417,6 +449,15 @@ private fun HookCard(state: MainViewModel.UiState, vm: MainViewModel) {
         }
         if (state.hookEnabled) {
             HorizontalDivider(Modifier.padding(vertical = 4.dp))
+            if (state.hookActive && state.hookLatencyMs > 0) {
+                Text(
+                    text = "≈ ${state.hookLatencyMs} ms added delay " +
+                        "(look-ahead ${state.hookLookaheadMs} + queue ${state.hookQueueMs}; " +
+                        "inference ${"%.0f".format(state.hookInferMs)} ms)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Every app", style = MaterialTheme.typography.bodyMedium)

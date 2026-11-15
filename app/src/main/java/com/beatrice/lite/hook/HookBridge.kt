@@ -64,6 +64,12 @@ object HookBridge {
 
     fun isActive(): Boolean = sessions.values.any { it.isActive() }
 
+    /** Latency of the stream that currently owns the engine, or null when idle. */
+    fun stats(): HookStats? {
+        val key = synchronized(ownerLock) { owner } ?: return null
+        return sessions[key]?.stats()
+    }
+
     /** Pushed when the user moves a slider while a stream is hooked. */
     fun setParams(params: com.beatrice.lite.engine.EngineParams) {
         sessions.values.forEach { it.setParams(params) }

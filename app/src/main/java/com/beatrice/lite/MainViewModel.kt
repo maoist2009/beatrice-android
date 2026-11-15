@@ -67,6 +67,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val hookActive: Boolean = false,
         val hookedPkg: String? = null,
         val hookFrames: Long = 0L,
+        val hookLatencyMs: Int = 0,
+        val hookLookaheadMs: Int = 0,
+        val hookQueueMs: Int = 0,
+        val hookInferMs: Double = 0.0,
+        val hasBeatrice: Boolean = false,
+        val hasRvc: Boolean = false,
         val apps: List<AppEntry> = emptyList(),
     ) {
         val ready: Boolean get() = modelName != null && !loadingModel
@@ -107,6 +113,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _state.value = _state.value.copy(live = true)
             attachLiveCallbacks()
         }
+        refreshAvailability()
         if (ModelLoader.isModelDir(beatriceDir) || store.isInstalled()) loadEngine()
         watchHook()
         viewModelScope.launch {
@@ -122,10 +129,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             while (true) {
                 val pkg = HookBridge.lastPkg
+                val stats = HookBridge.stats()
                 _state.value = _state.value.copy(
                     hookActive = HookBridge.isActive(),
                     hookedPkg = pkg,
                     hookFrames = pkg?.let { HookBridge.deliveredFor(it) } ?: 0L,
+                    hookLatencyMs = stats?.totalMs ?: 0,
+                    hookLookaheadMs = stats?.lookaheadMs ?: 0,
+                    hookQueueMs = stats?.queueMs ?: 0,
+                    hookInferMs = stats?.inferMs ?: 0.0,
                 )
                 delay(1_000)
             }
@@ -233,6 +245,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
                 EngineHub.reset()
+                refreshAvailability()
                 _state.value = _state.value.copy(importing = false, message = "Imported $summary")
                 loadEngine(force = true)
             } catch (c: CancellationException) {
@@ -293,6 +306,33 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 fail(t)
             }
         }
+    }
+
+    /**
+     * Which backends have their files on disk. Both can be installed at once,
+     * but only one is resident, so the UI offers a switch instead of making
+     * the user re-import a folder to change engine.
+     */
+    private fun refreshAvailability() {
+        val hasBeatrice = ModelLoader.isModelDir(beatriceDir)
+        val hasRvc = runCatching { store.sharedReady() && store.voices().isNotEmpty() }
+            .getOrDefault(false)
+        _state.value = _state.value.copy(hasBeatrice = hasBeatrice, hasRvc = hasRvc)
+    }
+
+    /** Swaps the resident backend; the choice is persisted for the hook path too. */
+    fun setBackend(backend: Backend) {
+        val s = _state.value
+        if (s.backend == backend || s.busy || s.live) return
+        if (s.hookEnabled) {
+            showError("Turn off “Use in other apps” before switching the engine.")
+            return
+        }
+        if (backend == Backend.BEATRICE && !s.hasBeatrice) return
+        if (backend == Backend.RVC && !s.hasRvc) return
+        prefs.edit().putString("backend", backend.name).apply()
+        EngineHub.reset()
+        loadEngine(force = true)
     }
 
     private fun adopt(processor: LiveProcessor, info: EngineInfo) {
