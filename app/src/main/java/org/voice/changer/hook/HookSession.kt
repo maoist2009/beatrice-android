@@ -51,6 +51,13 @@ class HookSession(
         private const val OUTPUT_SECONDS = 1.0
 
         /**
+         * Emits before the stream counts as warm. The first blocks pay for
+         * engine load and the first NPU calls and run 2-3x slower than steady
+         * state, so a dropout there must not size the queue for the whole call.
+         */
+        private const val WARMUP_BLOCKS = 12
+
+        /**
          * Cushion the last session settled on. Process-wide so switching
          * between apps (each gets its own session) does not relearn it, and
          * deliberately not persisted: a reboot starts optimistic again.
@@ -89,6 +96,8 @@ class HookSession(
     @Volatile private var blockMs = 0
     @Volatile private var primeMs = 300
     private val primeSamples: Int get() = rate * primeMs / 1000
+    /** Emits this session; only used to tell cold-start dropouts apart. */
+    private var emittedBlocks = 0
     private var primed = false
     private var cleanBlocks = 0
     private var lastTrimAt = 0L
@@ -196,7 +205,8 @@ class HookSession(
             // comes back down on its own (input and output run at the same
             // rate), so it has to be cut once. Only a full block of excess is
             // dropped, at most every couple of seconds, so a steady stream is
-            // never touched.
+            // never touched: the level's own sawtooth peak is already one block
+            // above the target.
             val high = primeSamples + (rate * blockMs / 1000).coerceAtLeast(rate / 10)
             val now = System.currentTimeMillis()
             if (fifo.size > high && now - lastTrimAt > 2_000) {
@@ -236,16 +246,28 @@ class HookSession(
 
     /** Grows the cushion by 100 ms, up to 800 ms; shared by every session. */
     private fun onUnderrun() {
+        // A dropout in the first blocks is the cold engine, not a property of
+        // the stream; learning from it costs the whole call ~200 ms of delay
+        // for a transient that is over after a second.
+        if (emittedBlocks <= WARMUP_BLOCKS) return
         val next = (primeMs + 100).coerceAtMost(800)
         primeMs = next
         learnedPrimeMs = next
     }
 
     private fun setPrime(ms: Int) {
+        if (ms != primeMs) Log.d(TAG, "prime ${primeMs} -> ${ms} ms")
         primeMs = ms
         learnedPrimeMs = ms
     }
 
+    /**
+     * Floor for the cushion: one backend block. The queue has to carry the gap
+     * between bursts, and the burst itself adds the block back, so a block is
+     * the smallest level that never drains to zero. Measured at the emit
+     * instant the level sits at ~144 ms against a 250 ms block, so the queue
+     * carries about one block and is not the dominant term of the delay.
+     */
     private fun minPrime(): Int = maxOf(120, blockMs)
 
     fun close() {
@@ -306,6 +328,7 @@ class HookSession(
                 val part = processor.next(source)
                 lastInferMs = (System.nanoTime() - t0) / 1_000_000.0
                 if (part.audio.isEmpty()) continue
+                emittedBlocks++
                 val resampler = outResampler ?: continue
                 val out = resampler.process(part.audio)
                 // Size the prefill from the backend's real block length: two
