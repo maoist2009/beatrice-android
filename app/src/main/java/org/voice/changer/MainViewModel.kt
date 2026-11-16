@@ -96,7 +96,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             rmsMix = prefs.getFloat("rmsMix", 0.25f),
             protect = prefs.getFloat("protect", 0.5f),
             filter = prefs.getInt("filter", 3),
-            f0Tail = prefs.getInt("f0Tail", 0),
+            // 1 used to mean the middle setting, which produced exactly the
+            // audio of 2 (see EngineParams.f0Tail); fold both onto low latency.
+            f0Tail = if (prefs.getInt("f0Tail", 0) >= 1) 1 else 0,
             hookEnabled = HookSettings.enabled(app),
             hookAll = HookSettings.allApps(app),
             hookTargets = HookSettings.targets(app),

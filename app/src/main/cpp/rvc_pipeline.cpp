@@ -298,8 +298,11 @@ void rvc_pipeline_set_filter_radius(rvc_pipeline_t *p, int radius) {
   p->voice.filter_radius = radius;
 }
 
+/* 0 = quality, 1 = low latency.  There used to be a middle setting that stepped
+ * the window back but still waited for it: it produced bit-identical audio to
+ * 1 and cost 100 ms, so it was removed rather than kept as a trap. */
 void rvc_pipeline_set_f0_tail(rvc_pipeline_t *p, int mode) {
-  p->voice.f0_tail = (mode < 0) ? 0 : (mode > 2 ? 2 : mode);
+  p->voice.f0_tail = (mode < 0) ? 0 : (mode > 1 ? 1 : mode);
 }
 
 void rvc_pipeline_destroy(rvc_pipeline_t *p) {
@@ -1131,12 +1134,12 @@ static inline size_t f0_window_for(const rvc_pipeline_t *p, size_t g) {
 }
 
 /* Real input block i needs before it is computable: the RMVPE window of its
- * last f0 frame (25i + t_ph - 1) must have fully arrived.  f0_tail == 2 skips
+ * last f0 frame (25i + t_ph - 1) must have fully arrived.  f0_tail == 1 skips
  * that wait entirely and only requires the encoder window, zero-padding the
  * last RMVPE window's tail (the frames it fills beyond the block are rewritten
  * by the next windows before any block reads them). */
 static inline size_t stream_need_raw(const rvc_pipeline_t *p, int i) {
-  if (p->voice.f0_tail >= 2) {
+  if (p->voice.f0_tail >= 1) {
     size_t win_lo = (size_t)i * (size_t)CTX_STRIDE * (size_t)SR16 / 100;
     size_t need_sig = win_lo + (size_t)HUBERT_T1_LEN * 5 + 10;
     return (need_sig > (size_t)PAD_SAMPLES) ? need_sig - (size_t)PAD_SAMPLES : 0;

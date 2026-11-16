@@ -59,7 +59,7 @@ object HookSettings {
             rmsMixRate = p.getFloat("rmsMix", 0.25f).toDouble(),
             protect = p.getFloat("protect", 0.5f).toDouble(),
             filterRadius = p.getInt("filter", 3),
-            f0Tail = p.getInt("f0Tail", 0),
+            f0Tail = if (p.getInt("f0Tail", 0) >= 1) 1 else 0,
         )
     }
 

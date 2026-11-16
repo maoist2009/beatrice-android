@@ -573,25 +573,19 @@ private fun ParamsCard(state: MainViewModel.UiState, vm: MainViewModel) {
                         label = { Text("Quality") },
                     )
                     FilterChip(
-                        selected = state.f0Tail == 1,
+                        selected = state.f0Tail >= 1,
                         onClick = { vm.setF0Tail(1) },
-                        label = { Text("Balanced") },
-                    )
-                    FilterChip(
-                        selected = state.f0Tail == 2,
-                        onClick = { vm.setF0Tail(2) },
                         label = { Text("Low latency") },
                     )
                 }
                 Text(
-                    text = when (state.f0Tail) {
-                        1 -> "−100 ms: the block's last f0 frames come from the " +
-                            "earliest window that still contains them, not the one " +
-                            "that centres them. Same audio path for live and file."
-                        2 -> "−110/160 ms: as balanced, plus the last window's tail " +
-                            "is zero-padded instead of waited for. Block-tail pitch " +
-                            "is the least accurate of the three."
-                        else -> "Waits for the RMVPE window that centres the block's " +
+                    text = if (state.f0Tail >= 1) {
+                        "−100 ms: the block's last f0 frames come from the earliest " +
+                            "window that still contains them and its tail is zero-padded " +
+                            "instead of waited for. Everything but the block-tail pitch " +
+                            "is unchanged."
+                    } else {
+                        "Waits for the RMVPE window that centres the block's " +
                             "last f0 frames — the most accurate block-tail pitch, " +
                             "at the cost of the longest look-ahead."
                     },

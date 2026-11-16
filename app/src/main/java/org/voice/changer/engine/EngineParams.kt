@@ -35,10 +35,10 @@ data class EngineParams(
      * Block-tail f0 policy, trading latency for the accuracy of the last f0
      * frames of each 250 ms block:
      *  - 0 quality: wait for the RMVPE window that puts those frames at the
-     *    window centre (+170/220 ms of look-ahead)
-     *  - 1 balanced: use the earliest window that still contains them
-     *    (+70/120 ms)
-     *  - 2 low latency: as 1, with that window's tail zero-padded (+60 ms)
+     *    window centre (the longest look-ahead)
+     *  - 1 low latency: use the earliest window that still contains them and
+     *    zero-pad its tail instead of waiting for it (~100 ms less)
+     * Everything outside the block tail is identical between the two.
      */
     val f0Tail: Int = 0,
 )
