@@ -474,7 +474,7 @@ private fun HookCard(state: MainViewModel.UiState, vm: MainViewModel) {
                 enabled = !state.hookAll && state.apps.isNotEmpty(),
             ) { Text("Choose apps") }
             Text(
-                text = "Enable the “Beatrice Lite” module in your Xposed manager and tick the same apps " +
+                text = "Enable the “Voice Changer” module in your Xposed manager and tick the same apps " +
                     "in its scope. This switch only decides whether audio is converted.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -561,6 +561,44 @@ private fun ParamsCard(state: MainViewModel.UiState, vm: MainViewModel) {
                 ParamSlider("Protect", "%.2f".format(state.protect), state.protect, 0f..0.5f, 19) { vm.setProtect(it) }
                 ParamSlider("Loudness match", "%.2f".format(state.rmsMix), state.rmsMix, 0f..1f, 19) { vm.setRmsMix(it) }
                 ParamSlider("f0 smoothing", "${state.filter}", state.filter.toFloat(), 1f..7f, 5) { vm.setFilter(it.roundToInt()) }
+                Text(
+                    text = "Block-tail f0",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = state.f0Tail == 0,
+                        onClick = { vm.setF0Tail(0) },
+                        label = { Text("Quality") },
+                    )
+                    FilterChip(
+                        selected = state.f0Tail == 1,
+                        onClick = { vm.setF0Tail(1) },
+                        label = { Text("Balanced") },
+                    )
+                    FilterChip(
+                        selected = state.f0Tail == 2,
+                        onClick = { vm.setF0Tail(2) },
+                        label = { Text("Low latency") },
+                    )
+                }
+                Text(
+                    text = when (state.f0Tail) {
+                        1 -> "−100 ms: the block's last f0 frames come from the " +
+                            "earliest window that still contains them, not the one " +
+                            "that centres them. Same audio path for live and file."
+                        2 -> "−110/160 ms: as balanced, plus the last window's tail " +
+                            "is zero-padded instead of waited for. Block-tail pitch " +
+                            "is the least accurate of the three."
+                        else -> "Waits for the RMVPE window that centres the block's " +
+                            "last f0 frames — the most accurate block-tail pitch, " +
+                            "at the cost of the longest look-ahead."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
             }
             ParamSlider("Output level", "%.0f%%".format(state.output * 100), state.output, 0.2f..2f, 17) { vm.setOutput(it) }
             HorizontalDivider(Modifier.padding(vertical = 6.dp))

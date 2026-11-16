@@ -86,6 +86,7 @@ class DebugActivity : Activity() {
                     pitchShift = pitch.toDouble(),
                     formantShift = formant.toDouble(),
                     vqNeighbors = vq,
+                    f0Tail = intent.getIntExtra("f0Tail", 0),
                 )
                 val engine: LiveProcessor = if (backend == "rvc") {
                     val store = RvcStore(filesDir)
@@ -241,6 +242,9 @@ class DebugActivity : Activity() {
         val wasEnabled = org.voice.changer.hook.HookSettings.enabled(this)
         val oldBackend = prefs.getString("backend", null)
         val oldVoice = prefs.getString("rvcVoice", null)
+        val oldF0Tail = prefs.getInt("f0Tail", 0)
+        val f0Tail = intent.getIntExtra("f0Tail", -1)
+        if (f0Tail >= 0) prefs.edit().putInt("f0Tail", f0Tail).apply()
         prefs.edit()
             .putString("backend", if (engine is org.voice.changer.engine.rvc.RvcProcessor) "RVC" else "BEATRICE")
             .putString("rvcVoice", intent.getStringExtra("voice"))
@@ -383,7 +387,8 @@ class DebugActivity : Activity() {
             show("hook vs direct: envelope corr=${"%.3f".format(best)} at lag ${bestLag * 20} ms")
         }
         org.voice.changer.hook.HookSettings.setEnabled(this, wasEnabled)
-        prefs.edit().putString("backend", oldBackend).putString("rvcVoice", oldVoice).apply()
+        prefs.edit().putString("backend", oldBackend).putString("rvcVoice", oldVoice)
+            .putInt("f0Tail", oldF0Tail).apply()
     }
 
     /** 20 ms RMS envelope; enough to compare two versions of the same speech. */

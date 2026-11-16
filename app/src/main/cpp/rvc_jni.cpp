@@ -16,7 +16,7 @@
 /* Copied from dreamlite (app/src/main/cpp/rvc_jni.cpp); the only change is the
  * Java package the entry points are bound to. */
 #define JNI_FUNC(ret, name) \
-  extern "C" JNIEXPORT ret JNICALL Java_com_beatrice_lite_engine_rvc_RvcJni_##name
+  extern "C" JNIEXPORT ret JNICALL Java_org_voice_changer_engine_rvc_RvcJni_##name
 
 static std::string jstr(JNIEnv *env, jstring s) {
   if (!s) return std::string();
@@ -254,9 +254,11 @@ JNI_FUNC(jstring, pipelineInit)(JNIEnv *env, jobject, jstring modelsDir,
   v.rms_mix_rate = 0.25;           /* official default until the manifest says otherwise */
   v.protect = 0.5;                 /* 0.5 = off in the official client */
   v.filter_radius = 3;
+  v.f0_tail = 0;                   /* quality: wait for the best-centred f0 window */
   if ((val = find_num("rms_mix_rate")) != HUGE_VAL) v.rms_mix_rate = val;
   if ((val = find_num("protect")) != HUGE_VAL) v.protect = val;
   if ((val = find_num("filter_radius")) != HUGE_VAL) v.filter_radius = (int)val;
+  if ((val = find_num("f0_tail")) != HUGE_VAL) v.f0_tail = (int)val;
 
   /* index_rate > 0 turns on the retrieval step; the index file is resolved
    * relative to the models dir. */
@@ -295,6 +297,14 @@ JNI_FUNC(jstring, pipelineSetProtect)(JNIEnv *env, jobject, jfloat protect) {
 JNI_FUNC(jstring, pipelineSetFilterRadius)(JNIEnv *env, jobject, jint radius) {
   if (!g_pipeline) return env->NewStringUTF("no pipeline");
   rvc_pipeline_set_filter_radius(g_pipeline, (int)radius);
+  return env->NewStringUTF("");
+}
+
+/* Block-tail f0 policy: 0 = wait for the best-centred RMVPE window,
+ * 1 = earliest real window, 2 = 1 with a zero-padded window tail. */
+JNI_FUNC(jstring, pipelineSetF0Tail)(JNIEnv *env, jobject, jint mode) {
+  if (!g_pipeline) return env->NewStringUTF("no pipeline");
+  rvc_pipeline_set_f0_tail(g_pipeline, (int)mode);
   return env->NewStringUTF("");
 }
 

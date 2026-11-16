@@ -271,6 +271,10 @@ struct rvc_pipeline {
   std::vector<uint64_t> blk_f0_last;     /* last rmvpe ticket needed by block i */
   std::vector<uint64_t> blk_c0_last;     /* last c0 ticket submitted for block i */
   size_t f0_folded = 0;                  /* windows already folded into track */
+  /* Frames below this index are final: they were used as the phase anchor of
+   * an emitted block, so a later (better) observation must not rewrite them —
+   * f0_cum would move and the sine gate would jump. */
+  size_t f0_frozen = 0;
 
   ~rvc_pipeline() { stop_npu(); if (qlog) fclose(qlog); rvc_index_free(index); }
   void stop_npu();
@@ -292,6 +296,10 @@ void rvc_pipeline_set_protect(rvc_pipeline_t *p, double protect) {
 
 void rvc_pipeline_set_filter_radius(rvc_pipeline_t *p, int radius) {
   p->voice.filter_radius = radius;
+}
+
+void rvc_pipeline_set_f0_tail(rvc_pipeline_t *p, int mode) {
+  p->voice.f0_tail = (mode < 0) ? 0 : (mode > 2 ? 2 : mode);
 }
 
 void rvc_pipeline_destroy(rvc_pipeline_t *p) {
@@ -432,6 +440,46 @@ void apply_filter_radius(double *f0, size_t n, int radius) {
   std::vector<double> tmp(f0, f0 + n);
   std::vector<double> win(k);
   for (size_t i = 0; i < n; i++) {
+    int lo = (int)i - h, hi = (int)i + h;
+    int m = 0;
+    for (int j = lo; j <= hi; j++) {
+      size_t u = (j < 0) ? 0 : ((size_t)j >= n ? n - 1 : (size_t)j);
+      win[m++] = tmp[u];
+    }
+    std::nth_element(win.data(), win.data() + h, win.data() + k);
+    f0[i] = win[h];
+  }
+}
+
+/* The streaming variants of the two passes above.  The streaming track is
+ * finalised once per emitted block, but everything below [from] has already
+ * been used to synthesise audio: filling and median-filtering it again would
+ * keep changing the prefix (a median re-applied to its own output is not a
+ * no-op) and the phase anchor f0_cum[anchor] with it.  So the prefix stays
+ * read-only and only [from, n) is written. */
+void interp_unvoiced_from(double *f0, size_t n, size_t from) {
+  std::vector<double> xp, fp;
+  for (size_t i = 0; i < n; i++)
+    if (f0[i] != 0.0) { xp.push_back((double)i); fp.push_back(f0[i]); }
+  if (xp.empty()) return;
+  for (size_t i = from; i < n; i++)
+    if (f0[i] == 0.0) f0[i] = rvc_np_interp((double)i, xp.data(), fp.data(), xp.size());
+}
+
+void apply_filter_radius_from(double *f0, size_t n, size_t from, int radius) {
+  if (radius <= 1 || n < 2) return;
+  int k = (radius / 2) * 2 + 1;
+  int h = k / 2;
+  if ((size_t)k >= n) {
+    std::vector<double> all(f0, f0 + n);
+    std::nth_element(all.data(), all.data() + n / 2, all.data() + n);
+    double m = all[n / 2];
+    for (size_t i = from; i < n; i++) f0[i] = m;
+    return;
+  }
+  std::vector<double> tmp(f0, f0 + n);
+  std::vector<double> win(k);
+  for (size_t i = from; i < n; i++) {
     int lo = (int)i - h, hi = (int)i + h;
     int m = 0;
     for (int j = lo; j <= hi; j++) {
@@ -1071,12 +1119,30 @@ void slot_pool<N>::submitted(uint64_t t) {
   ticket[(next + N - 1) % N] = t;
 }
 
+/* Window whose observation the fold will pick for frame g.  Every window that
+ * contains g holds it at a different position k = g - 10w, and the fold keeps
+ * the one closest to the window centre (k = 14/19).  Stepping one window back
+ * (k = 24/29) is still real audio and arrives 100 ms earlier, which is what
+ * f0_tail >= 1 selects. */
+static inline size_t f0_window_for(const rvc_pipeline_t *p, size_t g) {
+  size_t base = (g >= 10) ? g / 10 : 0;
+  size_t back = (p->voice.f0_tail >= 1) ? 2 : 1;
+  return (base >= back) ? base - back : 0;
+}
+
 /* Real input block i needs before it is computable: the RMVPE window of its
- * last f0 frame (25i + t_ph - 1) must have fully arrived.  compute_f0_track
- * selects, for frame g, the observation from window floor(g/10) - 1. */
+ * last f0 frame (25i + t_ph - 1) must have fully arrived.  f0_tail == 2 skips
+ * that wait entirely and only requires the encoder window, zero-padding the
+ * last RMVPE window's tail (the frames it fills beyond the block are rewritten
+ * by the next windows before any block reads them). */
 static inline size_t stream_need_raw(const rvc_pipeline_t *p, int i) {
+  if (p->voice.f0_tail >= 2) {
+    size_t win_lo = (size_t)i * (size_t)CTX_STRIDE * (size_t)SR16 / 100;
+    size_t need_sig = win_lo + (size_t)HUBERT_T1_LEN * 5 + 10;
+    return (need_sig > (size_t)PAD_SAMPLES) ? need_sig - (size_t)PAD_SAMPLES : 0;
+  }
   size_t g = (size_t)i * (size_t)CTX_STRIDE + (size_t)p->voice.t_ph - 1;
-  size_t w = (g >= 10) ? g / 10 - 1 : 0;
+  size_t w = f0_window_for(p, g);
   size_t need_sig = (size_t)F0_CTX_HOP * w + (size_t)F0_WIN;
   return (need_sig > (size_t)PAD_SAMPLES) ? need_sig - (size_t)PAD_SAMPLES : 0;
 }
@@ -1134,7 +1200,7 @@ static void stream_submit_f0_window(rvc_pipeline_t *p, size_t w) {
  * output pass does that, so this stays pure host work plus submission. */
 static int stream_prep_block(rvc_pipeline_t *p, int j) {
   size_t g = (size_t)j * (size_t)CTX_STRIDE + (size_t)p->voice.t_ph - 1;
-  size_t need_w = (g >= 10) ? g / 10 - 1 : 0;
+  size_t need_w = f0_window_for(p, g);
   stream_highpass(p, j);
 
   while (p->f0_windows <= need_w) stream_submit_f0_window(p, p->f0_windows);
@@ -1228,6 +1294,7 @@ static int stream_f0_fold(rvc_pipeline_t *p, size_t need_w) {
     }
     for (int k = 0; k < EMIT_FRAMES; k++) {
       size_t g = g0 + (size_t)k;
+      if (g < p->f0_frozen) continue;   /* already emitted: never rewrite */
       double cost = fabs((double)k - centre);
       if (cost < p->f0_best[g]) {
         p->f0_best[g] = cost;
@@ -1245,12 +1312,16 @@ static int stream_f0_fold(rvc_pipeline_t *p, size_t need_w) {
 }
 
 /* interp the unvoiced frames of the current prefix and rebuild the cumsum
- * the sine-gate phase is anchored to. */
+ * the sine-gate phase is anchored to.  Only the frames above f0_frozen are
+ * touched: the prefix is already audible. */
 static void stream_f0_finalize(rvc_pipeline_t *p) {
-  interp_unvoiced(p->f0_track.data(), p->f0_frames);
-  apply_filter_radius(p->f0_track.data(), p->f0_frames, p->voice.filter_radius);
-  p->f0_cum.assign(p->f0_frames + 1, 0.0);
-  for (size_t g = 0; g < p->f0_frames; g++)
+  const size_t from = p->f0_frozen;
+  const size_t n = p->f0_frames;
+  if (n <= from) return;
+  interp_unvoiced_from(p->f0_track.data(), n, from);
+  apply_filter_radius_from(p->f0_track.data(), n, from, p->voice.filter_radius);
+  p->f0_cum.assign(n + 1, 0.0);
+  for (size_t g = 0; g < n; g++)
     p->f0_cum[g + 1] = p->f0_cum[g] + p->f0_track[g];
 }
 
@@ -1852,6 +1923,7 @@ int rvc_pipeline_start_stream(rvc_pipeline_t *p) {
   p->f0_frames = 0;
   p->f0_windows = 0;
   p->f0_folded = 0;
+  p->f0_frozen = 0;
   p->chunks.clear();
   p->next_block = 0;
   p->next_prep = 0;
@@ -1925,7 +1997,7 @@ long rvc_pipeline_feed_stream(rvc_pipeline_t *p, const float *x, size_t n,
     {
       size_t gw = (size_t)(p->next_block + PREP_AHEAD) * (size_t)CTX_STRIDE +
                   (size_t)p->voice.t_ph - 1;
-      size_t need_w = (gw >= 10) ? gw / 10 - 1 : 0;
+      size_t need_w = f0_window_for(p, gw);
       while (p->f0_windows <= need_w) {
         size_t w = p->f0_windows;
         if (p->sig.size() < (size_t)F0_CTX_HOP * w + (size_t)F0_WIN) break;
@@ -1967,7 +2039,7 @@ long rvc_pipeline_feed_stream(rvc_pipeline_t *p, const float *x, size_t n,
 
     double t_blk = now_ms();
     size_t g = (size_t)i * (size_t)CTX_STRIDE + (size_t)p->voice.t_ph - 1;
-    size_t need_w = (g >= 10) ? g / 10 - 1 : 0;
+    size_t need_w = f0_window_for(p, g);
     int par = i & 1;
     if (stream_f0_fold(p, need_w) != 0) goto fail;
     stream_f0_finalize(p);
@@ -1975,6 +2047,12 @@ long rvc_pipeline_feed_stream(rvc_pipeline_t *p, const float *x, size_t n,
     stream_c0_gather(p, i);
     if (stream_out_features(p, i, par) != 0) goto fail;
     if (stream_synth(p, i, par, out + out_n) != 0) goto fail;
+    /* The next block's gate phase is f0_cum[25(i+1) + PAD_FRAMES]; freeze
+     * everything below it so a later window cannot move an audible frame. */
+    {
+      size_t anchor = (size_t)(i + 1) * (size_t)CTX_STRIDE + (size_t)PAD_FRAMES;
+      if (anchor > p->f0_frozen) p->f0_frozen = anchor;
+    }
     out_n += (size_t)block_frame;
     p->next_block++;
     p->st_blocks++;

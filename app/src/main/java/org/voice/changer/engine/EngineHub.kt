@@ -146,6 +146,7 @@ object EngineHub {
         o.put("rms_mix_rate", p.rmsMixRate)
         o.put("protect", p.protect)
         o.put("filter_radius", p.filterRadius)
+        o.put("f0_tail", p.f0Tail)
         // Retrieval needs the .index file; without one, skip the work entirely.
         o.put("index_rate", if (hasIndex) 0.5 else 0.0)
         if (!hasIndex) o.put("nprobe", 0)

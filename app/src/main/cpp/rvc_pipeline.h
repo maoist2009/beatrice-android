@@ -35,6 +35,7 @@ typedef struct {
   double rms_mix_rate;    /* loudness match exponent: 0 = keep source, 1 = keep output */
   double protect;         /* unvoiced-feature blend; >= 0.5 disables (official off) */
   int filter_radius;      /* median filter radius in f0 frames; <= 1 disables */
+  int f0_tail;            /* block-tail f0 policy; see rvc_pipeline_set_f0_tail */
 } rvc_voice_t;
 
 typedef struct {
@@ -84,6 +85,24 @@ void rvc_pipeline_set_pitch(rvc_pipeline_t *p, double semitones);
 void rvc_pipeline_set_rms_mix_rate(rvc_pipeline_t *p, double rate);
 void rvc_pipeline_set_protect(rvc_pipeline_t *p, double protect);
 void rvc_pipeline_set_filter_radius(rvc_pipeline_t *p, int radius);
+
+/* Block-tail f0 policy — how long to wait for the "best" RMVPE observation of
+ * the last f0 frame of a block.  The RMVPE grid is 100 ms and the block hop is
+ * 250 ms, so a frame sits at a different position k = g - 10w in every window
+ * that contains it; the official pipeline keeps the observation closest to the
+ * window centre.  Stopping one window earlier changes the f0 of the newest
+ * ~160 ms of each block, not the whole block: everything older was already
+ * folded, and frozen, by previous blocks.
+ *
+ *   0 (default) wait for the window that puts the frame at k = 14/19
+ *               (best estimate, ~170/220 ms of look-ahead)
+ *   1 stop at the earliest window that still contains the frame, k = 24/29
+ *               (real audio, edge position, ~70/120 ms)
+ *   2 as 1, but submit that window as soon as the encoder window is complete,
+ *               zero-padding its 320 ms tail (~60 ms, f0 tail is padded)
+ *
+ * Takes effect on the next emitted block; no graph reload. */
+void rvc_pipeline_set_f0_tail(rvc_pipeline_t *p, int mode);
 
 /* Converts n samples of 16 kHz mono audio. Writes at most out_cap floats to
  * out and returns the count, or -1 on failure (rvc_pipeline_last_error). */

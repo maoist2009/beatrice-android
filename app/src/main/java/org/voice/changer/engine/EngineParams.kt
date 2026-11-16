@@ -31,4 +31,14 @@ data class EngineParams(
     val protect: Double = 0.5,
     /** 1..7 median window over the f0 track; 1 is a no-op. */
     val filterRadius: Int = 3,
+    /**
+     * Block-tail f0 policy, trading latency for the accuracy of the last f0
+     * frames of each 250 ms block:
+     *  - 0 quality: wait for the RMVPE window that puts those frames at the
+     *    window centre (+170/220 ms of look-ahead)
+     *  - 1 balanced: use the earliest window that still contains them
+     *    (+70/120 ms)
+     *  - 2 low latency: as 1, with that window's tail zero-padded (+60 ms)
+     */
+    val f0Tail: Int = 0,
 )

@@ -61,6 +61,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val rmsMix: Float = 0.25f,
         val protect: Float = 0.5f,
         val filter: Int = 3,
+        val f0Tail: Int = 0,
         val hookEnabled: Boolean = false,
         val hookAll: Boolean = false,
         val hookTargets: Set<String> = emptySet(),
@@ -95,6 +96,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             rmsMix = prefs.getFloat("rmsMix", 0.25f),
             protect = prefs.getFloat("protect", 0.5f),
             filter = prefs.getInt("filter", 3),
+            f0Tail = prefs.getInt("f0Tail", 0),
             hookEnabled = HookSettings.enabled(app),
             hookAll = HookSettings.allApps(app),
             hookTargets = HookSettings.targets(app),
@@ -209,6 +211,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         rmsMixRate = s.rmsMix.toDouble(),
         protect = s.protect.toDouble(),
         filterRadius = s.filter,
+        f0Tail = s.f0Tail,
     )
 
     // ------------------------------------------------------------- import
@@ -408,6 +411,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setRmsMix(v: Float) { _state.value = _state.value.copy(rmsMix = v); applyParams() }
     fun setProtect(v: Float) { _state.value = _state.value.copy(protect = v); applyParams() }
     fun setFilter(v: Int) { _state.value = _state.value.copy(filter = v); applyParams() }
+    fun setF0Tail(v: Int) { _state.value = _state.value.copy(f0Tail = v); applyParams() }
 
     private fun applyParams() {
         val s = _state.value
@@ -425,6 +429,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             .putFloat("rmsMix", s.rmsMix)
             .putFloat("protect", s.protect)
             .putInt("filter", s.filter)
+            .putInt("f0Tail", s.f0Tail)
             .apply()
     }
 

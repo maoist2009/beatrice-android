@@ -66,6 +66,7 @@ class RvcProcessor(
         RvcJni.pipelineSetRmsMixRate(p.rmsMixRate.toFloat())
         RvcJni.pipelineSetProtect(p.protect.toFloat())
         RvcJni.pipelineSetFilterRadius(p.filterRadius)
+        RvcJni.pipelineSetF0Tail(p.f0Tail)
     }
 
     override fun next(pcm: PcmSource, validFrames: Int): ChunkAudio {

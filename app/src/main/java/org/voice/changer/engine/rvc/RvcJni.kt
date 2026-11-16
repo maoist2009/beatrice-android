@@ -64,6 +64,9 @@ object RvcJni {
 
     external fun pipelineSetFilterRadius(radius: Int): String
 
+    /** Block-tail f0 policy: 0 = quality, 1 = balanced, 2 = low latency. */
+    external fun pipelineSetF0Tail(mode: Int): String
+
     external fun pipelineDestroy()
 
     /** Per-graph graphExecute wall-time stats as a JSON array. */
