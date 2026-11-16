@@ -4,13 +4,13 @@ plugins {
 }
 
 android {
-    namespace = "com.beatrice.lite"
+    namespace = "org.voice.changer"
     compileSdk = 36
     buildToolsVersion = "36.0.0"
     ndkVersion = "27.1.12297006"
 
     defaultConfig {
-        applicationId = "com.beatrice.lite"
+        applicationId = "org.voice.changer"
         minSdk = 31
         targetSdk = 35
         versionCode = 1

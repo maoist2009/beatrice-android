@@ -1,4 +1,4 @@
-# Beatrice Lite (Android)
+# Voice Changer (Android)
 
 安卓原生变声客户端，内置两套可切换的后端，完全离线（无 WebView、不联网）：
 

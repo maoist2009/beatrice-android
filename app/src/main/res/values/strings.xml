@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Beatrice Lite</string>
+    <string name="app_name">Voice Changer</string>
     <string name="xposed_description">Routes another app\'s microphone through the Beatrice engine (rc.0 / RVC) running in this app.</string>
 
-    <string name="hero_title">Beatrice</string>
+    <string name="hero_title">Voice Changer</string>
     <string name="hero_idle">Bring the model in, pick a voice, then speak or drop a clip.</string>
     <string name="model_title">Model</string>
     <string name="model_none">No model loaded</string>
