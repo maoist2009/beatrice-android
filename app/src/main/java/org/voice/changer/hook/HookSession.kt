@@ -2,6 +2,7 @@ package org.voice.changer.hook
 
 import android.content.Context
 import android.util.Log
+import org.voice.changer.audio.NoiseGate
 import org.voice.changer.engine.EngineHub
 import org.voice.changer.engine.EngineParams
 import org.voice.changer.engine.LiveProcessor
@@ -66,6 +67,9 @@ class HookSession(
     }
 
     private val inResampler = StreamResampler(rate, 16_000)
+    /** Input gate, applied to the 16 kHz capture before it reaches the ring. */
+    private val gate = NoiseGate(16_000)
+    @Volatile private var gateDb = -50f
     private var outResampler: StreamResampler? = null
 
     private val inLock = Object()
@@ -149,6 +153,7 @@ class HookSession(
 
     fun setParams(params: EngineParams) {
         pendingParams = params
+        gateDb = params.noiseGateDb
     }
 
     /** Capture samples this stream starts from; the debug harness times with it. */
@@ -165,6 +170,8 @@ class HookSession(
         HookBridge.touch(key)
         val mono16 = inResampler.process(pcm)
         if (mono16.isNotEmpty()) {
+            gate.setThresholdDb(gateDb)
+            gate.process(mono16)
             val capturedAt = System.currentTimeMillis()
             synchronized(inLock) {
                 for (v in mono16) {
@@ -373,6 +380,7 @@ class HookSession(
         if (now != null && now === engine) return now
         val built = try {
             val params = HookSettings.engineParams(context)
+            gateDb = params.noiseGateDb
             EngineHub.ensureDefault(context, params).let { EngineHub.processor }
         } catch (t: Throwable) {
             Log.w(TAG, "no engine: ${t.message}")

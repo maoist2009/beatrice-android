@@ -87,6 +87,8 @@ class DebugActivity : Activity() {
                     formantShift = formant.toDouble(),
                     vqNeighbors = vq,
                     f0Tail = intent.getIntExtra("f0Tail", 0),
+                    indexRate = intent.getFloatExtra("indexRate", 0f),
+                    nprobe = intent.getIntExtra("nprobe", 0),
                 )
                 val engine: LiveProcessor = if (backend == "rvc") {
                     val store = RvcStore(filesDir)
@@ -245,6 +247,8 @@ class DebugActivity : Activity() {
         val oldF0Tail = prefs.getInt("f0Tail", 0)
         val f0Tail = intent.getIntExtra("f0Tail", -1)
         if (f0Tail >= 0) prefs.edit().putInt("f0Tail", f0Tail).apply()
+        val gate = intent.getFloatExtra("noiseGate", Float.NaN)
+        if (!gate.isNaN()) prefs.edit().putFloat("noiseGate", gate).apply()
         prefs.edit()
             .putString("backend", if (engine is org.voice.changer.engine.rvc.RvcProcessor) "RVC" else "BEATRICE")
             .putString("rvcVoice", intent.getStringExtra("voice"))

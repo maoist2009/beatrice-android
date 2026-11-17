@@ -32,6 +32,19 @@ data class EngineParams(
     /** 1..7 median window over the f0 track; 1 is a no-op. */
     val filterRadius: Int = 3,
     /**
+     * Retrieval blend weight against the voice's `retrieval.index`; 0 leaves
+     * retrieval off. Only has an effect on a pack that ships an index.
+     */
+    val indexRate: Float = 0f,
+    /** IVF probe count for retrieval; 0 uses whatever the index file records. */
+    val nprobe: Int = 0,
+    /**
+     * Input gate threshold in dBFS; >= 0 disables it. Frames below it never
+     * reach the model, so a quiet room does not get synthesised into the
+     * target voice. Shared by both backends.
+     */
+    val noiseGateDb: Float = -50f,
+    /**
      * Block-tail f0 policy, trading latency for the accuracy of the last f0
      * frames of each 250 ms block:
      *  - 0 quality: wait for the RMVPE window that puts those frames at the

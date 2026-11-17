@@ -60,6 +60,9 @@ object HookSettings {
             protect = p.getFloat("protect", 0.5f).toDouble(),
             filterRadius = p.getInt("filter", 3),
             f0Tail = if (p.getInt("f0Tail", 0) >= 1) 1 else 0,
+            indexRate = p.getFloat("indexRate", 0f),
+            nprobe = p.getInt("nprobe", 0),
+            noiseGateDb = p.getFloat("noiseGate", -50f),
         )
     }
 

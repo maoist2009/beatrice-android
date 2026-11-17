@@ -148,8 +148,8 @@ object EngineHub {
         o.put("filter_radius", p.filterRadius)
         o.put("f0_tail", p.f0Tail)
         // Retrieval needs the .index file; without one, skip the work entirely.
-        o.put("index_rate", if (hasIndex) 0.5 else 0.0)
-        if (!hasIndex) o.put("nprobe", 0)
+        o.put("index_rate", if (hasIndex) p.indexRate else 0.0f)
+        if (hasIndex) o.put("nprobe", p.nprobe) else o.put("nprobe", 0)
         o.toString()
     } catch (e: Exception) {
         Log.w(TAG, "manifest is not an object; using defaults")

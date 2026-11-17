@@ -42,12 +42,18 @@ class LiveEngine(private val processor: LiveProcessor) {
     private var failure: Throwable? = null
     @Volatile private var pendingParams: EngineParams? = null
 
+    /** Input gate on the microphone path; the threshold follows [setParams]. */
+    private val gate = NoiseGate(sampleRateIn)
+    @Volatile private var gateDb = -50f
+    private val gateBuf = FloatArray(320)
+
     /** Optional tap on the synthesized stream (debug capture). */
     @Volatile var onAudio: ((FloatArray) -> Unit)? = null
 
     /** Applied between chunks on the inference thread, so speaker swaps never race a running graph. */
     fun setParams(params: EngineParams) {
         pendingParams = params
+        gateDb = params.noiseGateDb
     }
 
     fun start(onLevel: (Float) -> Unit, onError: (Throwable) -> Unit) {
@@ -161,7 +167,11 @@ class LiveEngine(private val processor: LiveProcessor) {
         }
     }
 
-    private fun feedLoop(pcm: FloatArray, onLevel: (Float) -> Unit) {
+    private fun feedLoop(source: FloatArray, onLevel: (Float) -> Unit) {
+        // Gate a copy: the caller keeps the clip and may play it again.
+        val pcm = source.copyOf()
+        gate.setThresholdDb(gateDb)
+        gate.process(pcm)
         val step = 320
         val t0 = SystemClock.elapsedRealtime()
         var i = 0
@@ -202,10 +212,13 @@ class LiveEngine(private val processor: LiveProcessor) {
                     }
                     continue
                 }
+                for (i in 0 until n) gateBuf[i] = buf[i] / 32768f
+                gate.setThresholdDb(gateDb)
+                gate.process(gateBuf, n)
                 var sum = 0.0
                 synchronized(lock) {
                     for (i in 0 until n) {
-                        val v = buf[i] / 32768f
+                        val v = gateBuf[i]
                         ring[((received + i) % ring.size).toInt()] = v
                         sum += v.toDouble() * v
                     }

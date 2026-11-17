@@ -9,6 +9,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import org.voice.changer.audio.AudioIO
 import org.voice.changer.audio.FloatPlayer
+import org.voice.changer.audio.NoiseGate
 import org.voice.changer.engine.Backend
 import org.voice.changer.engine.EngineHub
 import org.voice.changer.engine.EngineInfo
@@ -62,6 +63,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val protect: Float = 0.5f,
         val filter: Int = 3,
         val f0Tail: Int = 0,
+        val indexRate: Float = 0f,
+        val nprobe: Int = 0,
+        val noiseGate: Float = -50f,
+        /** Parallel to [voices]: whether that pack ships a retrieval index. */
+        val voiceHasIndex: List<Boolean> = emptyList(),
         val hookEnabled: Boolean = false,
         val hookAll: Boolean = false,
         val hookTargets: Set<String> = emptySet(),
@@ -99,6 +105,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // 1 used to mean the middle setting, which produced exactly the
             // audio of 2 (see EngineParams.f0Tail); fold both onto low latency.
             f0Tail = if (prefs.getInt("f0Tail", 0) >= 1) 1 else 0,
+            indexRate = prefs.getFloat("indexRate", 0f),
+            nprobe = prefs.getInt("nprobe", 0),
+            noiseGate = prefs.getFloat("noiseGate", -50f),
             hookEnabled = HookSettings.enabled(app),
             hookAll = HookSettings.allApps(app),
             hookTargets = HookSettings.targets(app),
@@ -214,6 +223,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         protect = s.protect.toDouble(),
         filterRadius = s.filter,
         f0Tail = s.f0Tail,
+        indexRate = s.indexRate,
+        nprobe = s.nprobe,
+        noiseGateDb = s.noiseGate,
     )
 
     // ------------------------------------------------------------- import
@@ -342,8 +354,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun adopt(processor: LiveProcessor, info: EngineInfo) {
         Log.i("Beatrice", "engine ready: ${info.backend} ${info.name} @${info.outputRate}")
+        val packs = if (info.backend == Backend.RVC) store.voices() else emptyList()
         val voices = if (info.backend == Backend.RVC) {
-            store.voices().map { it.name }.ifEmpty { info.voices }
+            packs.map { it.name }.ifEmpty { info.voices }
         } else info.voices
         val index = when {
             info.backend == Backend.RVC -> voices.indexOf(info.name).coerceAtLeast(0)
@@ -358,6 +371,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             modelName = info.name,
             modelVersion = info.subtitle,
             voices = voices,
+            voiceHasIndex = voices.map { name -> packs.firstOrNull { it.name == name }?.hasIndex == true },
             voice = index,
             outputRate = info.outputRate,
             loadingModel = false,
@@ -414,6 +428,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setProtect(v: Float) { _state.value = _state.value.copy(protect = v); applyParams() }
     fun setFilter(v: Int) { _state.value = _state.value.copy(filter = v); applyParams() }
     fun setF0Tail(v: Int) { _state.value = _state.value.copy(f0Tail = v); applyParams() }
+    fun setIndexRate(v: Float) { _state.value = _state.value.copy(indexRate = v); applyParams() }
+    fun setNprobe(v: Int) { _state.value = _state.value.copy(nprobe = v); applyParams() }
+    fun setNoiseGate(v: Float) { _state.value = _state.value.copy(noiseGate = v); applyParams() }
+
+    /**
+     * Retrieval is staged with the voice: the index is only read when the
+     * pipeline is created, so a rate or probe change needs the voice reloaded.
+     * Called when the slider is released rather than on every step.
+     */
+    fun commitIndexChange() {
+        val s = _state.value
+        if (s.backend != Backend.RVC || s.busy || s.live) return
+        if (s.hookEnabled) {
+            showError("Turn off “Use in other apps” before changing the index.")
+            return
+        }
+        EngineHub.reset()
+        loadEngine(force = true)
+    }
 
     private fun applyParams() {
         val s = _state.value
@@ -432,6 +465,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             .putFloat("protect", s.protect)
             .putInt("filter", s.filter)
             .putInt("f0Tail", s.f0Tail)
+            .putFloat("indexRate", s.indexRate)
+            .putInt("nprobe", s.nprobe)
+            .putFloat("noiseGate", s.noiseGate)
             .apply()
     }
 
@@ -511,8 +547,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val out = withContext(Dispatchers.Default) {
-                    e.setParams(params(_state.value))
-                    e.convert(pcm) { p -> _state.value = _state.value.copy(progress = p) }
+                    val p = params(_state.value)
+                    e.setParams(p)
+                    val gated = pcm.copyOf()
+                    NoiseGate(16_000).apply {
+                        setThresholdDb(p.noiseGateDb)
+                        process(gated)
+                    }
+                    e.convert(gated) { done -> _state.value = _state.value.copy(progress = done) }
                 }
                 Log.i("Beatrice", "converted ${out.size} samples @$rate")
                 output = out
