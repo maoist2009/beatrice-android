@@ -30,11 +30,24 @@ debug 变体复用 release 签名，包名加 `.tmp` 后缀，可与正式包共
 ## 使用
 
 1. 导入模型（见下文「模型」）。两套后端的模型互相独立。
-2. 在首页选择后端与音色，然后按需使用：
-   - **文件转换**：选音频 → 转换 → 试听 / 保存；
-   - **实时**：打开麦克风开关，走前台服务，锁屏和后台继续；
-   - **全局变声**：本 APK 同时是 Xposed 模块。在 Xposed 管理器（如 LSPosed）里启用模块、
-     勾选目标 App（scope），再打开 App 内的 “Use in other apps” 开关 —— 两者都满足才会转换。
+2. 首页是变声 / 播放页：实时麦克风开关、后端切换，以及 Xposed 的 “Use in other apps”。
+   其余功能各占一页，从首页顶部的按钮进入：
+
+| 页面 | 内容 |
+| --- | --- |
+| 首页 Voice Changer | 实时变声、后端切换、Xposed 开关与目标 App |
+| RVC | 音色包、pitch / protect / loudness / f0 平滑 / block-tail f0 / index / 噪声门 |
+| Beatrice | 模型、pitch / formant / intonation / pitch correction / VQ / 噪声门 |
+| Convert | 文件转换：选音频 → 转换 → 试听 / 保存 |
+| About | 版本、引擎与来源说明 |
+
+各页共用同一个 `MainViewModel`，在任一页改的参数在其它页立刻可见。只有 RVC 音色包
+和 Beatrice 模型这两类文件是分开导入的。
+
+- **文件转换**：Convert 页选音频 → 转换 → 试听 / 保存；
+- **实时**：首页打开麦克风开关，走前台服务，锁屏和后台继续；
+- **全局变声**：本 APK 同时是 Xposed 模块。在 Xposed 管理器（如 LSPosed）里启用模块、
+  勾选目标 App（scope），再打开首页的 “Use in other apps” 开关 —— 两者都满足才会转换。
 
 本地麦克风模式与 hook 模式互斥：打开实时模式会自动关掉 hook 开关，因为两者共用同一个
 有状态引擎。
@@ -88,6 +101,22 @@ block-tail f0 两档，只影响每个 250 ms 块末尾那几个 f0 帧：
 | low latency | 用「最早仍包含这几个帧」的窗，窗尾补零不等 | 少约 100 ms，块尾音高更粗 |
 
 两档之外的部分完全相同：同一份流式代码、同一批 mel/Hubert 窗、同样的合成。
+
+### RVC 检索（index）
+
+| 项 | 默认 | 说明 |
+| --- | --- | --- |
+| index rate | 0（关） | 把 `.index` 里最近的帧按比例混进 encoder 输出；0.5 是官方客户端的常用值 |
+| index probes | 0（用文件值） | IVF 探测数；0 表示读 `.index` 里记录的 nprobe |
+
+`.index` 只在管线创建时读取，所以改这两项会在松手时重新加载音色（约 1 秒）；
+hook 开着时不允许改，先关掉再调。没有 `.index` 的音色包，rate 无论多少都是关的。
+
+### 噪声门
+
+输入 10 ms 峰值包络低于阈值的帧不进模型（`noiseGateDb`，默认 −50 dB，0 dB 为关）。
+两套后端共用，文件转换 / 实时 / hook 三条路径过同一道门；开门斜坡 5 ms、关门 30 ms，
+避免咔哒声和咬字被截断。
 
 ## 验证结果
 
@@ -191,7 +220,7 @@ lat 740 = 145  推理期间积压的采集（≈单块推理）
 ## 目录结构
 
 ```
-app/src/main/java/com/beatrice/lite/
+app/src/main/java/org/voice/changer/
   engine/
     Proto.kt / Layouts.kt / Rc0Graphs.kt    ONNX 图构建与权重布局
     OrtSession.kt / PitchDsp.kt / Fft.kt    ORT 会话、音高特征、FFT
@@ -201,13 +230,23 @@ app/src/main/java/com/beatrice/lite/
     rvc/                                    JNI 绑定、流式适配、包存储、计时
   audio/
     AudioIO.kt / LiveEngine.kt              解码/重采样/WAV/播放，麦克风实时链路
+    NoiseGate.kt                            输入噪声门（三条路径共用）
   hook/
     HookEntry.kt / HookAudio.kt             Xposed 入口、四种 PCM 重载的就地改写
     HookTap.kt / HookRemote.kt              目标进程队列、配置缓存
     HookSession.kt / HookBridge.kt          单条转换流、会话登记与统计
     HookProvider.kt / StreamResampler.kt    导出的 provider、流式重采样
     FloatFifo.kt                            有界环形队列
-  LiveService.kt / MainViewModel.kt / MainActivity.kt
+  ui/
+    Theme.kt / Components.kt                主题、页面骨架、通用控件
+    LiveScreen.kt                           首页：实时 + 后端切换 + hook 开关
+    RvcScreen.kt / BeatriceScreen.kt        两个后端的参数页
+    ConvertScreen.kt / AboutScreen.kt       文件转换、关于
+    SharedVm.kt                             跨 Activity 共用的 ViewModel
+  MainActivity.kt                           首页
+  RvcActivity.kt / BeatriceActivity.kt      两个后端页
+  ConvertActivity.kt / AboutActivity.kt     转换页、关于页
+  LiveService.kt / MainViewModel.kt         前台服务、共享状态机
 app/src/main/cpp/        RVC 管线（QNN/HTP 移植）+ JNI
 app/src/main/jniLibs/    QNN HTP 运行库（Htp / V79Stub / V79Skel / System / NetRunExtensions）
 ```
