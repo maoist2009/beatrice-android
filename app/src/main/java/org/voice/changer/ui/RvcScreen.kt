@@ -43,7 +43,7 @@ import kotlin.math.roundToInt
 /** RVC page: the NPU backend, its voice packs and its own tunables. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun RvcScreen(vm: MainViewModel, onBack: () -> Unit) {
+fun RvcScreen(vm: MainViewModel, onNavigate: (Page) -> Unit) {
     val state by vm.state.collectAsState()
 
     val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -52,8 +52,9 @@ fun RvcScreen(vm: MainViewModel, onBack: () -> Unit) {
 
     AppScaffold(
         title = "RVC",
+        page = Page.Rvc,
+        onNavigate = onNavigate,
         subtitle = "RVC v2 · Hexagon NPU",
-        onBack = onBack,
     ) {
         ModelCard(state) { folderPicker.launch(null) }
 

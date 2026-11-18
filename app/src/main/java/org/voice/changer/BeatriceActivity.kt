@@ -4,6 +4,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import org.voice.changer.ui.AppTheme
+import org.voice.changer.ui.backToHome
+import org.voice.changer.ui.openPage
 import org.voice.changer.ui.BeatriceScreen
 import org.voice.changer.ui.SharedVm
 
@@ -11,7 +13,8 @@ import org.voice.changer.ui.SharedVm
 class BeatriceActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        backToHome()
         val vm = SharedVm.get(application)
-        setContent { AppTheme { BeatriceScreen(vm) { finish() } } }
+        setContent { AppTheme { BeatriceScreen(vm) { openPage(it) } } }
     }
 }

@@ -30,8 +30,8 @@ debug 变体复用 release 签名，包名加 `.tmp` 后缀，可与正式包共
 ## 使用
 
 1. 导入模型（见下文「模型」）。两套后端的模型互相独立。
-2. 首页是变声 / 播放页：实时麦克风开关、后端切换，以及 Xposed 的 “Use in other apps”。
-   其余功能各占一页，从首页顶部的按钮进入：
+2. 五个页面由底栏切换（Material 3 `NavigationBar`）。首页是变声 / 播放页：实时麦克风开关、
+   后端切换，以及 Xposed 的 “Use in other apps”：
 
 | 页面 | 内容 |
 | --- | --- |
@@ -243,6 +243,7 @@ app/src/main/java/org/voice/changer/
     RvcScreen.kt / BeatriceScreen.kt        两个后端的参数页
     ConvertScreen.kt / AboutScreen.kt       文件转换、关于
     SharedVm.kt                             跨 Activity 共用的 ViewModel
+    BottomTabs.kt                           页面枚举、底栏、切页与返回
   MainActivity.kt                           首页
   RvcActivity.kt / BeatriceActivity.kt      两个后端页
   ConvertActivity.kt / AboutActivity.kt     转换页、关于页

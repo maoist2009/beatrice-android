@@ -5,11 +5,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import org.voice.changer.ui.AboutScreen
 import org.voice.changer.ui.AppTheme
+import org.voice.changer.ui.backToHome
+import org.voice.changer.ui.openPage
 
 /** About page: static text, no engine state. */
 class AboutActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { AppTheme { AboutScreen { finish() } } }
+        backToHome()
+        setContent { AppTheme { AboutScreen { openPage(it) } } }
     }
 }

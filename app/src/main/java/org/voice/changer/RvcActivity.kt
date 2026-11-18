@@ -4,6 +4,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import org.voice.changer.ui.AppTheme
+import org.voice.changer.ui.backToHome
+import org.voice.changer.ui.openPage
 import org.voice.changer.ui.RvcScreen
 import org.voice.changer.ui.SharedVm
 
@@ -11,7 +13,8 @@ import org.voice.changer.ui.SharedVm
 class RvcActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        backToHome()
         val vm = SharedVm.get(application)
-        setContent { AppTheme { RvcScreen(vm) { finish() } } }
+        setContent { AppTheme { RvcScreen(vm) { openPage(it) } } }
     }
 }

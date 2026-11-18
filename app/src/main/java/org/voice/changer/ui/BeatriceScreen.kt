@@ -24,7 +24,7 @@ import kotlin.math.roundToInt
 
 /** Beatrice page: the CPU backend, its model and its own tunables. */
 @Composable
-fun BeatriceScreen(vm: MainViewModel, onBack: () -> Unit) {
+fun BeatriceScreen(vm: MainViewModel, onNavigate: (Page) -> Unit) {
     val state by vm.state.collectAsState()
 
     val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -33,8 +33,9 @@ fun BeatriceScreen(vm: MainViewModel, onBack: () -> Unit) {
 
     AppScaffold(
         title = "Beatrice",
+        page = Page.Beatrice,
+        onNavigate = onNavigate,
         subtitle = "rc.0 · CPU",
-        onBack = onBack,
     ) {
         ModelCard(state) { folderPicker.launch(null) }
 

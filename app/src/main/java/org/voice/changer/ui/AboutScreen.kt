@@ -12,7 +12,7 @@ import androidx.compose.ui.unit.dp
 
 /** About page: what the app is, which engines it runs and where the parts come from. */
 @Composable
-fun AboutScreen(onBack: () -> Unit) {
+fun AboutScreen(onNavigate: (Page) -> Unit) {
     val context = LocalContext.current
     val version = remember {
         runCatching {
@@ -22,8 +22,9 @@ fun AboutScreen(onBack: () -> Unit) {
 
     AppScaffold(
         title = "About",
+        page = Page.About,
+        onNavigate = onNavigate,
         subtitle = version?.let { "Version $it" },
-        onBack = onBack,
     ) {
         SectionCard(title = "What this is") {
             Text(

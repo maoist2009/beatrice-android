@@ -37,7 +37,7 @@ import kotlin.math.roundToInt
 
 /** Offline conversion: pick a clip, convert it, play or save the result. */
 @Composable
-fun ConvertScreen(vm: MainViewModel, onBack: () -> Unit) {
+fun ConvertScreen(vm: MainViewModel, onNavigate: (Page) -> Unit) {
     val state by vm.state.collectAsState()
     val context = LocalContext.current
 
@@ -47,8 +47,9 @@ fun ConvertScreen(vm: MainViewModel, onBack: () -> Unit) {
 
     AppScaffold(
         title = "Convert",
+        page = Page.Convert,
+        onNavigate = onNavigate,
         subtitle = "Offline · whole file",
-        onBack = onBack,
     ) {
         SectionCard(title = "Input") {
             Row(verticalAlignment = Alignment.CenterVertically) {

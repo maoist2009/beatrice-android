@@ -50,11 +50,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import org.voice.changer.AboutActivity
-import org.voice.changer.BeatriceActivity
-import org.voice.changer.ConvertActivity
 import org.voice.changer.MainViewModel
-import org.voice.changer.RvcActivity
 import org.voice.changer.engine.Backend
 import kotlin.math.roundToInt
 
@@ -67,7 +63,7 @@ import kotlin.math.roundToInt
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun XposedScreen(vm: MainViewModel, onNavigate: (Class<*>) -> Unit) {
+fun XposedScreen(vm: MainViewModel, onNavigate: (Page) -> Unit) {
     val state by vm.state.collectAsState()
     val context = LocalContext.current
 
@@ -83,24 +79,10 @@ fun XposedScreen(vm: MainViewModel, onNavigate: (Class<*>) -> Unit) {
 
     AppScaffold(
         title = "Voice Changer",
+        page = Page.Home,
+        onNavigate = onNavigate,
         subtitle = state.modelVersion ?: "rc.0 · RVC v2 · on-device",
     ) {
-        SectionCard(title = "Pages") {
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                OutlinedButton(onClick = { onNavigate(RvcActivity::class.java) }) { Text("RVC") }
-                OutlinedButton(onClick = { onNavigate(BeatriceActivity::class.java) }) { Text("Beatrice") }
-                OutlinedButton(onClick = { onNavigate(ConvertActivity::class.java) }) { Text("Convert") }
-                OutlinedButton(onClick = { onNavigate(AboutActivity::class.java) }) { Text("About") }
-            }
-            Hint(
-                "RVC and Beatrice are the two engines; each page holds its own " +
-                    "voice packs and controls. Convert turns a file over offline.",
-            )
-        }
-
         LiveCard(state) {
             if (state.live) {
                 vm.stopLive()
