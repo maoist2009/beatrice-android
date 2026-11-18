@@ -41,8 +41,9 @@ debug 变体复用 release 签名，包名加 `.tmp` 后缀，可与正式包共
 | Convert | 文件转换：选音频 → 转换 → 试听 / 保存 |
 | About | 版本、引擎与来源说明 |
 
-各页共用同一个 `MainViewModel`，在任一页改的参数在其它页立刻可见。只有 RVC 音色包
-和 Beatrice 模型这两类文件是分开导入的。
+五个页面是同一个 Activity 里的五个 Compose 页面（`ui/ChangerApp.kt`），共用同一个
+`MainViewModel`：在任一页改的参数在其它页立刻可见，转换或播放切页也不会中断。
+只有 RVC 音色包和 Beatrice 模型这两类文件是分开导入的。
 
 - **文件转换**：Convert 页选音频 → 转换 → 试听 / 保存；
 - **实时**：首页打开麦克风开关，走前台服务，锁屏和后台继续；
@@ -238,15 +239,13 @@ app/src/main/java/org/voice/changer/
     HookProvider.kt / StreamResampler.kt    导出的 provider、流式重采样
     FloatFifo.kt                            有界环形队列
   ui/
+    ChangerApp.kt                           单 Activity 的页面容器、底栏切换与返回
     Theme.kt / Components.kt                主题、页面骨架、通用控件
+    BottomTabs.kt                           页面枚举与 Material 3 底栏
     LiveScreen.kt                           首页：实时 + 后端切换 + hook 开关
     RvcScreen.kt / BeatriceScreen.kt        两个后端的参数页
     ConvertScreen.kt / AboutScreen.kt       文件转换、关于
-    SharedVm.kt                             跨 Activity 共用的 ViewModel
-    BottomTabs.kt                           页面枚举、底栏、切页与返回
-  MainActivity.kt                           首页
-  RvcActivity.kt / BeatriceActivity.kt      两个后端页
-  ConvertActivity.kt / AboutActivity.kt     转换页、关于页
+  MainActivity.kt                           唯一 Activity，只装载 ChangerApp
   LiveService.kt / MainViewModel.kt         前台服务、共享状态机
 app/src/main/cpp/        RVC 管线（QNN/HTP 移植）+ JNI
 app/src/main/jniLibs/    QNN HTP 运行库（Htp / V79Stub / V79Skel / System / NetRunExtensions）

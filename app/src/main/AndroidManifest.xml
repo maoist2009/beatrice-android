@@ -38,30 +38,6 @@
             </intent-filter>
         </activity>
 
-        <activity
-            android:name=".RvcActivity"
-            android:exported="false"
-            android:label="@string/app_name"
-            android:theme="@style/Theme.BeatriceLite" />
-
-        <activity
-            android:name=".BeatriceActivity"
-            android:exported="false"
-            android:label="@string/app_name"
-            android:theme="@style/Theme.BeatriceLite" />
-
-        <activity
-            android:name=".ConvertActivity"
-            android:exported="false"
-            android:label="@string/app_name"
-            android:theme="@style/Theme.BeatriceLite" />
-
-        <activity
-            android:name=".AboutActivity"
-            android:exported="false"
-            android:label="@string/app_name"
-            android:theme="@style/Theme.BeatriceLite" />
-
         <service
             android:name=".LiveService"
             android:exported="false"
