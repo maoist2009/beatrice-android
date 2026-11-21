@@ -16,6 +16,11 @@ import java.util.concurrent.ConcurrentHashMap
  * way: whether the stream should be converted is decided per call from the
  * configuration the app serves, so enabling/disabling and changing targets
  * take effect within a second without restarting the target app.
+ *
+ * The only process it refuses is its own: the app records for the Convert page
+ * through the same AudioRecord, and converting that would feed the engine its
+ * own output. Which *other* apps are converted is the manager's scope plus the
+ * app's own list — never a guess from the package name.
  */
 class HookEntry : IXposedHookLoadPackage {
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
@@ -50,7 +55,6 @@ class HookEntry : IXposedHookLoadPackage {
             }
         }
         if (pkg == BuildConfig.APPLICATION_ID) return
-        if (SKIP.containsMatchIn(process)) return
         if (!installed.add(process)) return
         try {
             val record = XposedHelpers.findClass("android.media.AudioRecord", lpparam.classLoader)
@@ -70,8 +74,6 @@ class HookEntry : IXposedHookLoadPackage {
     }
 
     private companion object {
-        /** Never touch our own recorder, or apps whose job is recording. */
-        val SKIP = Regex("recorder|voicenote|soundrecorder", RegexOption.IGNORE_CASE)
         val installed: MutableSet<String> = ConcurrentHashMap.newKeySet()
     }
 }

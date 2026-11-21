@@ -174,7 +174,8 @@ AudioRecord.read  (音频线程)
   放进目标进程会直接把目标 App 撑爆，所以转换全部留在本进程。
 - 单声道化后送引擎，写回时复制到每个声道；`byte[] / short[] / float[] / ByteBuffer`
   四种重载都处理（按 `AudioRecord.getAudioFormat()` 区分 PCM16 / PCM_FLOAT）。
-- 进程名包含 `recorder / voicenote / soundrecorder` 的直接跳过，自己的包名也跳过。
+- 只有自己的包名跳过：Convert 页录音用的是同一个 `AudioRecord`，不跳会让引擎吃自己的输出。
+  其它 App 转不转由 scope + 目标列表决定，不按包名猜（录音类 App 想录一段变声后的声音也是合理用法）。
 - 一条流独占引擎：新流接管前会把旧流关掉（`HookBridge.claim`），空闲 8 s 的会话自动回收。
 - 首次回调要等引擎加载 + 预灌（`primeSamples`，等于后端一块的长度，250–800 ms 自适应），
   这段时间目标 App 听到的是原始声音；之后如果下行队列被抽空，会退回原声重新预灌
