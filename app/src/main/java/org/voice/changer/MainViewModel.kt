@@ -68,6 +68,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val noiseGate: Float = -50f,
         /** Parallel to [voices]: whether that pack ships a retrieval index. */
         val voiceHasIndex: List<Boolean> = emptyList(),
+        /** Labels for the backend that is not resident, read from disk. */
+        val rvcName: String? = null,
+        val rvcSubtitle: String? = null,
+        val beatriceName: String? = null,
+        val beatriceSubtitle: String? = null,
         val hookEnabled: Boolean = false,
         val hookAll: Boolean = false,
         val hookTargets: Set<String> = emptySet(),
@@ -332,9 +337,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     private fun refreshAvailability() {
         val hasBeatrice = ModelLoader.isModelDir(beatriceDir)
+        val beatrice = if (hasBeatrice) ModelLoader.describe(beatriceDir) else null
         val hasRvc = runCatching { store.sharedReady() && store.voices().isNotEmpty() }
             .getOrDefault(false)
-        _state.value = _state.value.copy(hasBeatrice = hasBeatrice, hasRvc = hasRvc)
+        val packs = if (hasRvc) runCatching { store.voices() }.getOrDefault(emptyList()) else emptyList()
+        // The pack the engine will stage: the last one used, else the first.
+        val selected = packs.firstOrNull { it.name == prefs.getString("rvcVoice", null) }
+            ?: packs.firstOrNull()
+        _state.value = _state.value.copy(
+            hasBeatrice = hasBeatrice,
+            hasRvc = hasRvc,
+            beatriceName = beatrice?.first,
+            beatriceSubtitle = beatrice?.let { "${it.second} · on-device CPU" },
+            rvcName = selected?.name,
+            rvcSubtitle = selected?.let { if (it.hasIndex) "RVC v2 · Hexagon NPU · index" else "RVC v2 · Hexagon NPU" },
+        )
     }
 
     /** Swaps the resident backend; the choice is persisted for the hook path too. */
@@ -366,10 +383,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (info.backend == Backend.RVC) {
             prefs.edit().putString("rvcVoice", info.name).apply()
         }
+        val isRvc = info.backend == Backend.RVC
         _state.value = _state.value.copy(
             backend = info.backend,
             modelName = info.name,
             modelVersion = info.subtitle,
+            rvcName = if (isRvc) info.name else _state.value.rvcName,
+            rvcSubtitle = if (isRvc) info.subtitle else _state.value.rvcSubtitle,
+            beatriceName = if (isRvc) _state.value.beatriceName else info.name,
+            beatriceSubtitle = if (isRvc) _state.value.beatriceSubtitle else info.subtitle,
             voices = voices,
             voiceHasIndex = voices.map { name -> packs.firstOrNull { it.name == name }?.hasIndex == true },
             voice = index,

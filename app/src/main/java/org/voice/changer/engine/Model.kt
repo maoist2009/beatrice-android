@@ -139,6 +139,19 @@ object ModelLoader {
     fun findToml(dir: File): File? =
         dir.listFiles()?.firstOrNull { it.isFile && it.name.endsWith(".toml", ignoreCase = true) }
 
+    /**
+     * Name and version from the .toml alone. The UI needs to label a model
+     * that is installed but not the resident engine, and loading the weights
+     * just to read a string would cost a second and 300 MB.
+     */
+    fun describe(dir: File): Pair<String, String>? = runCatching {
+        val toml = findToml(dir)?.readText() ?: return null
+        val model = parseToml(toml)["model"] ?: return null
+        val name = model["name"] as? String ?: "Beatrice"
+        val version = model["version"] as? String ?: SUPPORTED_VERSION
+        name to version
+    }.getOrNull()
+
     fun isModelDir(dir: File): Boolean =
         findToml(dir) != null && find(dir, "phone_extractor.bin") != null &&
             find(dir, "pitch_estimator.bin") != null && find(dir, "waveform_generator.bin") != null &&

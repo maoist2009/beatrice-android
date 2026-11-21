@@ -56,7 +56,12 @@ fun RvcScreen(vm: MainViewModel, onNavigate: (Page) -> Unit) {
         onNavigate = onNavigate,
         subtitle = "RVC v2 · Hexagon NPU",
     ) {
-        ModelCard(state) { folderPicker.launch(null) }
+        ModelCard(
+            state = state,
+            backend = Backend.RVC,
+            onImport = { folderPicker.launch(null) },
+            onLoad = { vm.setBackend(Backend.RVC) },
+        )
 
         if (state.ready && state.voices.isNotEmpty()) {
             SectionCard(title = "Voice pack") {
@@ -85,25 +90,55 @@ fun RvcScreen(vm: MainViewModel, onNavigate: (Page) -> Unit) {
 
         if (state.ready && state.isRvc) {
             RvcParams(state, vm)
-        } else if (state.hasRvc) {
-            SectionCard(title = "Not loaded") {
-                Text(
-                    text = "Another engine is resident. Only one backend runs at a time, " +
-                        "so loading RVC swaps the NPU pipeline in (about a second).",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Button(onClick = { vm.setBackend(Backend.RVC) }, enabled = !state.busy) {
-                    Text("Load RVC")
-                }
-            }
         }
+
+        PipelineCard(
+                stages = listOf(
+                    "hubert c0 / r / enc" to "content features",
+                    "rmvpe" to "f0 contour",
+                    "encflow" to "speaker encoder",
+                    "flowreverse" to "latent flow",
+                    "decnsf" to "waveform",
+                ),
+                note = "QNN graphs on the Hexagon NPU: HuBERT and RMVPE included, one " +
+                    "250 ms block per 4000 input samples.",
+            )
 
         state.error?.let { message -> ErrorCard(message) { vm.clearMessage() } }
     }
 }
 
+/**
+ * Status card for one backend's model.
+ *
+ * It shows that backend's own model even when the other one is resident:
+ * sharing a single "current model" card meant the Beatrice page labelled
+ * itself with whatever RVC pack happened to be loaded.
+ */
 @Composable
-fun ModelCard(state: MainViewModel.UiState, onImport: () -> Unit) {
+fun ModelCard(
+    state: MainViewModel.UiState,
+    backend: Backend,
+    onImport: () -> Unit,
+    onLoad: () -> Unit,
+) {
+    val resident = state.ready && state.backend == backend
+    val installed = if (backend == Backend.RVC) state.hasRvc else state.hasBeatrice
+    val name = when {
+        resident -> state.modelName
+        backend == Backend.RVC -> state.rvcName
+        else -> state.beatriceName
+    } ?: if (backend == Backend.RVC) "No voice pack" else "No model"
+    val subtitle = when {
+        !installed -> if (backend == Backend.RVC) {
+            "Import a pack to use this engine"
+        } else {
+            "Import a model folder to use this engine"
+        }
+        resident -> state.modelVersion ?: "ready"
+        backend == Backend.RVC -> state.rvcSubtitle ?: "RVC v2 · Hexagon NPU"
+        else -> state.beatriceSubtitle ?: "rc.0 · on-device CPU"
+    }
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         modifier = Modifier.fillMaxWidth(),
@@ -122,30 +157,38 @@ fun ModelCard(state: MainViewModel.UiState, onImport: () -> Unit) {
                         Box(
                             modifier = Modifier
                                 .size(12.dp)
-                                .background(if (state.ready) Color(0xFF2FA36B) else Color(0xFFC9C9D4), CircleShape),
+                                .background(if (resident) Color(0xFF2FA36B) else Color(0xFFC9C9D4), CircleShape),
                         )
                     }
                 }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
-                        text = state.modelName ?: "No model loaded",
+                        text = name,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
                         text = when {
                             state.importing -> "Copying the folder…"
-                            state.loadingModel -> "Preparing the on-device engine…"
-                            state.ready -> state.modelVersion ?: "ready"
-                            else -> "Pick a Beatrice model folder or an RVC pack"
+                            state.loadingModel && state.backend == backend -> "Preparing the on-device engine…"
+                            else -> subtitle
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 TextButton(onClick = onImport, enabled = !state.busy) {
-                    Text(if (state.ready) "Replace" else "Import")
+                    Text(if (installed) "Replace" else "Import")
+                }
+            }
+            if (installed && !resident) {
+                Button(
+                    onClick = onLoad,
+                    enabled = !state.busy && !state.live,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Load " + if (backend == Backend.RVC) "RVC" else "Beatrice")
                 }
             }
         }

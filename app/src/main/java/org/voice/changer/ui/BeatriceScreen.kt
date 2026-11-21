@@ -37,22 +37,28 @@ fun BeatriceScreen(vm: MainViewModel, onNavigate: (Page) -> Unit) {
         onNavigate = onNavigate,
         subtitle = "rc.0 · CPU",
     ) {
-        ModelCard(state) { folderPicker.launch(null) }
+        ModelCard(
+            state = state,
+            backend = Backend.BEATRICE,
+            onImport = { folderPicker.launch(null) },
+            onLoad = { vm.setBackend(Backend.BEATRICE) },
+        )
 
         if (state.ready && !state.isRvc) {
             BeatriceParams(state, vm)
-        } else if (state.hasBeatrice) {
-            SectionCard(title = "Not loaded") {
-                Text(
-                    text = "Another engine is resident. Only one backend runs at a time, " +
-                        "so loading Beatrice swaps the CPU graphs in.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Button(onClick = { vm.setBackend(Backend.BEATRICE) }, enabled = !state.busy) {
-                    Text("Load Beatrice")
-                }
-            }
         }
+
+        PipelineCard(
+                stages = listOf(
+                    "pitch_estimator" to "f0 contour",
+                    "phone_extractor" to "content features",
+                    "waveform_generator" to "waveform",
+                    "speaker_embeddings" to "voice identity",
+                    "embedding_setter" to "voice switch",
+                ),
+                note = "The rc.0 weights are rebuilt into ONNX graphs and run on ONNX " +
+                    "Runtime, all on the CPU: no NPU, no network.",
+            )
 
         state.error?.let { message -> ErrorCard(message) { vm.clearMessage() } }
     }

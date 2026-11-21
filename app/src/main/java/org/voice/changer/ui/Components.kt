@@ -24,6 +24,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -139,6 +140,28 @@ fun ParamSlider(
             onValueChangeFinished = onFinished,
             modifier = Modifier.fillMaxWidth(),
         )
+    }
+}
+
+/** The stages one backend runs, in order, for the page that owns it. */
+@Composable
+fun PipelineCard(stages: List<Pair<String, String>>, note: String) {
+    SectionCard(title = "Pipeline") {
+        stages.forEach { (stage, what) ->
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = stage,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = what,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Hint(note)
     }
 }
 
