@@ -107,6 +107,9 @@ class LiveService : Service() {
         Log.i(TAG, "starting engine: ${processor.javaClass.simpleName} @${processor.outputRate} Hz")
         val engine = LiveEngine(processor)
         engine.setParams(pendingParams ?: EngineParams())
+        engine.wantScope = metersEnabled
+        engine.onStats = { stats -> onStats?.invoke(stats) }
+        engine.onScope = { scope -> onScope?.invoke(scope) }
         if (BuildConfig.DEBUG) attachDebugTap(intent, engine)
         live = engine
         running = true
@@ -280,6 +283,16 @@ class LiveService : Service() {
 
         @Volatile var onLevel: ((Float) -> Unit)? = null
         @Volatile var onError: ((Throwable) -> Unit)? = null
+
+        /** Mirrors the UI's "Meters" switch; off means nothing is sampled or drawn. */
+        @Volatile var metersEnabled = true
+        @Volatile var onStats: ((LiveEngine.Stats) -> Unit)? = null
+        @Volatile var onScope: ((FloatArray) -> Unit)? = null
+
+        fun setMeters(on: Boolean) {
+            metersEnabled = on
+            instance?.live?.wantScope = on
+        }
         @Volatile private var pendingParams: EngineParams? = null
 
         fun updateParams(params: EngineParams) {

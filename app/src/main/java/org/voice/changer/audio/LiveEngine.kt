@@ -50,6 +50,29 @@ class LiveEngine(private val processor: LiveProcessor) {
     /** Optional tap on the synthesized stream (debug capture). */
     @Volatile var onAudio: ((FloatArray) -> Unit)? = null
 
+    /**
+     * Numbers the UI shows while the loop runs. [latencyMs] is measured, not
+     * estimated: the ring holds exactly the input that has been captured but
+     * not converted yet, so the gap between capture and handoff is
+     * `(received - outputSamples) / 16 kHz`, and the speaker adds its own
+     * buffer on top.
+     */
+    data class Stats(val rtf: Float, val inferMs: Double, val latencyMs: Int)
+
+    @Volatile var onStats: ((Stats) -> Unit)? = null
+
+    /** Last ~40 ms of converted audio, for the oscilloscope. */
+    @Volatile var onScope: ((FloatArray) -> Unit)? = null
+
+    /** False while the UI has the meters hidden: nothing is copied or drawn. */
+    @Volatile var wantScope = false
+    private val scopeRing = FloatArray(1024)
+    private var scopeAt = 0L
+    private var statsAt = 0L
+    private var outFrames = 0L
+    private var rtfEma = 0f
+    private var inferEma = 0.0
+
     /** Applied between chunks on the inference thread, so speaker swaps never race a running graph. */
     fun setParams(params: EngineParams) {
         pendingParams = params
@@ -61,6 +84,9 @@ class LiveEngine(private val processor: LiveProcessor) {
         processor.reset()
         running = true
         received = 0
+        outFrames = 0
+        rtfEma = 0f
+        inferEma = 0.0
         failure = null
 
         val minRec = AudioRecord.getMinBufferSize(
@@ -131,6 +157,9 @@ class LiveEngine(private val processor: LiveProcessor) {
         processor.reset()
         running = true
         received = 0
+        outFrames = 0
+        rtfEma = 0f
+        inferEma = 0.0
         val minOut = AudioTrack.getMinBufferSize(
             sampleRateOut,
             AudioFormat.CHANNEL_OUT_MONO,
@@ -263,7 +292,9 @@ class LiveEngine(private val processor: LiveProcessor) {
                 val source = PcmSource { i ->
                     if (i < start || i >= end) 0f else snapshot[i - start]
                 }
+                val t0 = SystemClock.elapsedRealtimeNanos()
                 val part = processor.next(source)
+                val inferMs = (SystemClock.elapsedRealtimeNanos() - t0) / 1_000_000.0
                 if (part.audio.isNotEmpty()) {
                     onAudio?.invoke(part.audio)
                     var off = 0
@@ -272,11 +303,43 @@ class LiveEngine(private val processor: LiveProcessor) {
                         if (wrote <= 0) break
                         off += wrote
                     }
+                    outFrames += part.audio.size
                 }
+                publish(part.audio, inferMs)
             }
         } catch (t: Throwable) {
             if (running) onError(t)
         }
+    }
+
+    /**
+     * Feeds the meters at 5 Hz and the oscilloscope at 20 Hz. Both are optional:
+     * with the meters hidden nothing is copied, so the loop is exactly what it
+     * was before they existed.
+     */
+    private fun publish(audio: FloatArray, inferMs: Double) {
+        val now = SystemClock.elapsedRealtime()
+        if (audio.isNotEmpty() && wantScope && now - scopeAt >= 50) {
+            scopeAt = now
+            val keep = min(audio.size, scopeRing.size)
+            var at = 0
+            // Newest samples win when a chunk is longer than the window.
+            for (i in audio.size - keep until audio.size) scopeRing[at++] = audio[i]
+            while (at < scopeRing.size) scopeRing[at++] = 0f
+            onScope?.invoke(scopeRing.copyOf())
+        }
+        if (now - statsAt < 200) return
+        statsAt = now
+        val audioMs = audio.size * 1000.0 / sampleRateOut
+        if (audioMs <= 0.0) return
+        val blockRtf = (inferMs / audioMs).toFloat()
+        rtfEma = if (rtfEma == 0f) blockRtf else rtfEma * 0.8f + blockRtf * 0.2f
+        inferEma = if (inferEma == 0.0) inferMs else inferEma * 0.8 + inferMs * 0.2
+        val backlog = (received - processor.outputSamples).coerceAtLeast(0)
+        // Written but not played yet: the speaker's own share of the delay.
+        val unplayed = (outFrames - (track?.playbackHeadPosition ?: 0)).coerceAtLeast(0)
+        val speakerMs = (unplayed * 1000 / sampleRateOut).toInt()
+        onStats?.invoke(Stats(rtfEma, inferEma, (backlog * 1000 / sampleRateIn).toInt() + speakerMs))
     }
 
     fun stop() {

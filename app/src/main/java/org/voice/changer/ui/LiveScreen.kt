@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -12,8 +13,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -49,6 +52,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -87,29 +93,33 @@ fun XposedScreen(vm: MainViewModel, onNavigate: (Page) -> Unit) {
         onNavigate = onNavigate,
         subtitle = state.modelVersion ?: "rc.0 · RVC v2 · on-device",
     ) {
-        LiveCard(state) {
-            if (state.live) {
-                vm.stopLive()
-            } else {
-                val granted = ContextCompat.checkSelfPermission(
-                    context,
-                    Manifest.permission.RECORD_AUDIO,
-                ) == PackageManager.PERMISSION_GRANTED
-                if (granted) {
-                    vm.startLive()
-                } else if (android.os.Build.VERSION.SDK_INT >= 33) {
-                    micPermission.launch(
-                        arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS),
-                    )
+        HookCard(state, vm)
+
+        LiveCard(
+            state = state,
+            onMeters = vm::setMeters,
+            onToggle = {
+                if (state.live) {
+                    vm.stopLive()
                 } else {
-                    micPermission.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
+                    val granted = ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.RECORD_AUDIO,
+                    ) == PackageManager.PERMISSION_GRANTED
+                    if (granted) {
+                        vm.startLive()
+                    } else if (android.os.Build.VERSION.SDK_INT >= 33) {
+                        micPermission.launch(
+                            arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS),
+                        )
+                    } else {
+                        micPermission.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
+                    }
                 }
-            }
-        }
+            },
+        )
 
         EngineCard(state, vm)
-
-        HookCard(state, vm)
 
         state.error?.let { message -> ErrorCard(message) { vm.clearMessage() } }
 
@@ -125,7 +135,11 @@ fun XposedScreen(vm: MainViewModel, onNavigate: (Page) -> Unit) {
 }
 
 @Composable
-private fun LiveCard(state: MainViewModel.UiState, onToggle: () -> Unit) {
+private fun LiveCard(
+    state: MainViewModel.UiState,
+    onToggle: () -> Unit,
+    onMeters: (Boolean) -> Unit,
+) {
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         modifier = Modifier.fillMaxWidth(),
@@ -150,32 +164,101 @@ private fun LiveCard(state: MainViewModel.UiState, onToggle: () -> Unit) {
                 }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("Live voice", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        text = "Play through this phone's speaker",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
                     Text(
                         text = when {
                             state.live -> "Speaking as ${state.modelName ?: "the target voice"}"
                             !state.ready -> "Waiting for a model"
-                            else -> "Hear the conversion through the speaker"
+                            else -> "For checking the voice out loud. Routing into an app is the option above."
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Button(
-                    onClick = onToggle,
+                Switch(
+                    checked = state.live,
+                    onCheckedChange = { onToggle() },
                     enabled = state.ready,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (state.live) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                    ),
-                ) { Text(if (state.live) "Stop" else "Start") }
+                )
             }
             if (state.live) {
                 LinearProgressIndicator(
                     progress = { state.level },
                     modifier = Modifier.fillMaxWidth(),
                 )
+                if (state.showMeters) {
+                    MeterRow(state)
+                    Waveform(state.scope)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Meters", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "RTF, measured delay and the waveform",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = state.showMeters, onCheckedChange = onMeters)
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun MeterRow(state: MainViewModel.UiState) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Meter("RTF", if (state.liveRtf > 0f) "%.2f×".format(state.liveRtf) else "—")
+        Meter("Model", if (state.liveInferMs > 0.0) "%.0f ms".format(state.liveInferMs) else "—")
+        Meter("Delay", if (state.liveDelayMs > 0) "≈ ${state.liveDelayMs} ms" else "—")
+    }
+}
+
+@Composable
+private fun RowScope.Meter(label: String, value: String) {
+    Column(Modifier.weight(1f)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(value, style = MaterialTheme.typography.titleSmall)
+    }
+}
+
+/**
+ * Oscilloscope of the converted audio. Drawn from a snapshot the engine hands
+ * over at 20 Hz; with the meters switched off no snapshot is taken at all.
+ */
+@Composable
+private fun Waveform(samples: FloatArray) {
+    val line = MaterialTheme.colorScheme.primary
+    val grid = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f)
+    Canvas(Modifier.fillMaxWidth().height(56.dp)) {
+        val mid = size.height / 2f
+        drawLine(grid, Offset(0f, mid), Offset(size.width, mid), strokeWidth = 1f)
+        if (samples.size < 2) return@Canvas
+        val step = maxOf(1, samples.size / 512)
+        val path = Path()
+        var first = true
+        var i = 0
+        while (i < samples.size) {
+            val y = mid - samples[i].coerceIn(-1f, 1f) * mid * 0.9f
+            val x = i * size.width / (samples.size - 1)
+            if (first) {
+                path.moveTo(x, y)
+                first = false
+            } else {
+                path.lineTo(x, y)
+            }
+            i += step
+        }
+        drawPath(path, line, style = Stroke(width = 1.5.dp.toPx()))
     }
 }
 

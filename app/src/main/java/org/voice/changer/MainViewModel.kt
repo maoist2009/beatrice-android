@@ -94,6 +94,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val beatriceSubtitle: String? = null,
         val hookEnabled: Boolean = false,
         val hookAll: Boolean = true,
+        /** Meters: RTF, measured delay and the oscilloscope; off saves a little CPU. */
+        val showMeters: Boolean = true,
+        val liveRtf: Float = 0f,
+        val liveInferMs: Double = 0.0,
+        val liveDelayMs: Int = 0,
+        val scope: FloatArray = FloatArray(0),
         val hookTargets: Set<String> = emptySet(),
         val hookActive: Boolean = false,
         val hookedPkg: String? = null,
@@ -142,6 +148,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             hookEnabled = HookSettings.enabled(app),
             hookAll = HookSettings.allApps(app),
             hookTargets = HookSettings.targets(app),
+            showMeters = prefs.getBoolean("meters", true),
         ),
     )
     val state: StateFlow<UiState> = _state.asStateFlow()
@@ -246,6 +253,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun attachLiveCallbacks() {
         LiveService.onLevel = { lvl -> _state.value = _state.value.copy(level = lvl) }
+        // Also flips a live engine that the system restarted without us.
+        LiveService.setMeters(_state.value.showMeters)
+        LiveService.onStats = { stats ->
+            _state.value = _state.value.copy(
+                liveRtf = stats.rtf,
+                liveInferMs = stats.inferMs,
+                liveDelayMs = stats.latencyMs,
+            )
+        }
+        LiveService.onScope = if (_state.value.showMeters) {
+            { scope -> _state.value = _state.value.copy(scope = scope) }
+        } else {
+            null
+        }
         LiveService.onError = { t ->
             viewModelScope.launch {
                 _state.value = _state.value.copy(live = false, level = 0f, error = t.message ?: t.toString())
@@ -561,8 +582,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun stopLive() {
         if (!_state.value.live) return
-        _state.value = _state.value.copy(live = false, level = 0f)
+        _state.value = _state.value.copy(
+            live = false,
+            level = 0f,
+            liveRtf = 0f,
+            liveInferMs = 0.0,
+            liveDelayMs = 0,
+            scope = FloatArray(0),
+        )
         runCatching { LiveService.stop(getApplication()) }
+    }
+
+    /** Turns the live meters off: the engine stops copying scope data entirely. */
+    fun setMeters(on: Boolean) {
+        prefs.edit().putBoolean("meters", on).apply()
+        LiveService.setMeters(on)
+        LiveService.onScope = if (on) {
+            { scope -> _state.value = _state.value.copy(scope = scope) }
+        } else {
+            null
+        }
+        _state.value = _state.value.copy(
+            showMeters = on,
+            scope = if (on) _state.value.scope else FloatArray(0),
+        )
     }
 
     fun showError(text: String) {
