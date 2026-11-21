@@ -77,6 +77,25 @@ object HookRemote {
         }.apply { isDaemon = true }.start()
     }
 
+    /**
+     * Announces the module to the app once per process. The app records the
+     * caller, which is what lets its status card tell a scope that works from
+     * one that only looks right.
+     */
+    fun hello(pkg: String, process: String) {
+        Thread {
+            try {
+                val ctx = context() ?: return@Thread
+                ctx.contentResolver.call(uri, "hello", null, Bundle().apply {
+                    putString("pkg", pkg)
+                    putString("process", process)
+                })
+            } catch (t: Throwable) {
+                // The app is not running; nothing to report to.
+            }
+        }.apply { isDaemon = true }.start()
+    }
+
     fun process(key: String, pkg: String, rate: Int, channels: Int, pcm: FloatArray): FloatArray {
         val ctx = context() ?: return EMPTY
         return try {

@@ -179,6 +179,27 @@ AudioRecord.read  (音频线程)
 - 队列有上界：出块时如果高于「预灌 + 一块」，就一次性裁回预灌深度（丢的是最旧的转换后音频，
   带 2 s 冷却，稳态不触发）；预灌阶段也做一次同样的裁剪。
 - 配置（开关 / 目标列表 / 参数）每秒从 provider 拉一次，改完不用重启目标 App。
+### 怎么确认模块真的生效
+
+框架不提供「我这个模块是否启用 / scope 是什么」的查询接口，所以 App 只显示能证明的东西，
+首页「Use in other apps」下面是两类证据：
+
+| 显示 | 含义 |
+| --- | --- |
+| `Loaded into this app (Xposed API 93)` | 框架把 Xposed API 注入进了本 App 的进程：模块启用，且本 App 在 scope 里（确定） |
+| `Not loaded into this app` | **未知**。只说明本 App 不在 scope —— 模块一般不会把自己勾进 scope，这不代表模块没启用 |
+| 目标 App 一行 `seen 2 min ago` | 该 App 的进程里模块跑过（它向本 App 报到过）：启用 + scope 都正确（确定） |
+| `not seen` | **未知**：scope 没勾它、模块没启用，或者它自上次之后没被打开过 |
+
+依据只有一条：`handleLoadPackage` 只在框架判定「该进程在 scope 内」时才会被调用，模块因此
+才能向本 App 报到（`HookEntry` 在主进程的 `callApplicationOnCreate` 之后发一次 `hello`，
+`HookProvider` 用调用方 uid 认包名并记下时间）。**「看见」是确定的，「没看见」永远只是未知。**
+
+App 有意**不检测 Xposed 管理器**：LSPosed 及其 fork 的管理器是模块目录里的寄生 APK
+（如 `/data/adb/modules/zygisk_vector/manager.apk`），可以隐藏、不在 `/data/app` 里，
+Android 11 起包名查询还会被可见性过滤 —— 按包名找管理器既找不到，也说明不了模块是否启用。
+scope 配置本身在 `/data/adb/lspd/config/modules_config.db`，只有 root 能读。
+
 - `HookProvider` 是 `exported="true"` 且没有权限保护：同机任何 App 都能调它拿到当前配置
   或喂音频。自用没问题，分发给别人前应加 `signature|knownSigners` 级权限，或改成
   只在模块里用 bindService 拿到的本地 socket。
@@ -241,6 +262,7 @@ app/src/main/java/org/voice/changer/
     HookEntry.kt / HookAudio.kt             Xposed 入口、四种 PCM 重载的就地改写
     HookTap.kt / HookRemote.kt              目标进程队列、配置缓存
     HookSession.kt / HookBridge.kt          单条转换流、会话登记与统计
+    HookStatus.kt / XposedSelf.kt           模块心跳记录、本进程是否被注入
     HookProvider.kt / StreamResampler.kt    导出的 provider、流式重采样
     FloatFifo.kt                            有界环形队列
   ui/

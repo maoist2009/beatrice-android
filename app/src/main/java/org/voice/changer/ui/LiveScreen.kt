@@ -253,9 +253,89 @@ private fun HookCard(state: MainViewModel.UiState, vm: MainViewModel) {
                     "audio is converted.",
             )
         }
+        ModuleStatus(state)
     }
     if (showTargets) {
         TargetDialog(state, vm) { showTargets = false }
+    }
+}
+
+/**
+ * What the Xposed side actually reports, which is less than what the manager
+ * shows: the framework gives a module no way to read its own enable state or
+ * scope, so the app displays the two honest signals — the manager that is
+ * installed, and whether the module has ever reached it from a target process.
+ */
+@Composable
+private fun ModuleStatus(state: MainViewModel.UiState) {
+    HorizontalDivider(Modifier.padding(vertical = 6.dp))
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            text = "Module status",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = when (val api = state.moduleApiVersion) {
+                null -> "Not loaded into this app. That only means this app is not in the " +
+                    "module's scope; it says nothing about whether the module is enabled."
+                else -> "Loaded into this app (Xposed API $api): the module is enabled."
+            },
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+    if (!state.hookEnabled) return
+    val rows = if (state.hookAll) {
+        state.hookSeen.toList().sortedByDescending { it.second }
+    } else {
+        state.hookTargets.map { it to state.hookSeen[it] }
+    }
+    val now = System.currentTimeMillis()
+    rows.take(6).forEach { (pkg, at) ->
+        val label = state.apps.firstOrNull { it.pkg == pkg }?.label ?: pkg
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(8.dp)
+                    .background(
+                        if (at != null) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                        CircleShape,
+                    ),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+            )
+            Text(
+                text = if (at == null) "not seen" else "seen ${ago(at, now)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+    Hint(
+        if (rows.isEmpty()) {
+            "Pick the apps above, then tick the same apps in the module's scope. Nothing " +
+                "can be verified until a target has run the module at least once."
+        } else {
+            "A target turns “seen” when the module has run inside it: open that app once. " +
+                "“not seen” means the scope does not include it, the module is off, or it has " +
+                "not been opened since — force-stop it, then open it again."
+        },
+    )
+}
+
+private fun ago(at: Long, now: Long): String {
+    val s = ((now - at) / 1000).coerceAtLeast(0)
+    return when {
+        s < 10 -> "just now"
+        s < 90 -> "$s s ago"
+        s < 5400 -> "${s / 60} min ago"
+        else -> "${s / 3600} h ago"
     }
 }
 

@@ -21,6 +21,8 @@ import org.voice.changer.engine.ModelLoader
 import org.voice.changer.engine.rvc.RvcStore
 import org.voice.changer.hook.HookBridge
 import org.voice.changer.hook.HookSettings
+import org.voice.changer.hook.HookStatus
+import org.voice.changer.hook.XposedSelf
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -100,6 +102,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val hookLookaheadMs: Int = 0,
         val hookQueueMs: Int = 0,
         val hookInferMs: Double = 0.0,
+        /**
+         * Xposed API level when the framework injected into this process, else
+         * null — which means "unknown", not "disabled".
+         */
+        val moduleApiVersion: Int? = null,
+        /** package -> last time that package asked us for configuration. */
+        val hookSeen: Map<String, Long> = emptyMap(),
         val hasBeatrice: Boolean = false,
         val hasRvc: Boolean = false,
         val apps: List<AppEntry> = emptyList(),
@@ -151,6 +160,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             attachLiveCallbacks()
         }
         refreshAvailability()
+        val api = XposedSelf.apiVersion()
+        Log.i("Beatrice", "xposed: api=$api (null = not scoped into this app)")
+        _state.value = _state.value.copy(moduleApiVersion = api)
         if (ModelLoader.isModelDir(beatriceDir) || store.isInstalled()) loadEngine()
         watchHook()
         viewModelScope.launch {
@@ -175,6 +187,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     hookLookaheadMs = stats?.lookaheadMs ?: 0,
                     hookQueueMs = stats?.queueMs ?: 0,
                     hookInferMs = stats?.inferMs ?: 0.0,
+                    hookSeen = HookStatus.seen(getApplication()),
                 )
                 delay(1_000)
             }

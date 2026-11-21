@@ -21,6 +21,7 @@ class HookProvider : ContentProvider() {
         const val METHOD_CONFIG = "config"
         const val METHOD_PROCESS = "process"
         const val METHOD_REPORT = "report"
+        const val METHOD_HELLO = "hello"
     }
 
     override fun onCreate(): Boolean {
@@ -32,7 +33,19 @@ class HookProvider : ContentProvider() {
 
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
         return when (method) {
-            METHOD_CONFIG -> HookBridge.config()
+            METHOD_CONFIG -> {
+                // Every configuration request is a heartbeat: it proves the
+                // framework loaded the module into the calling package, which
+                // is the only scope evidence available without root.
+                context?.let { HookStatus.touchCaller(it, extras?.getString("pkg")) }
+                HookBridge.config()
+            }
+            // Sent once per process by HookEntry, so the app can show which
+            // targets the framework really loads, before any audio flows.
+            METHOD_HELLO -> {
+                context?.let { HookStatus.touchCaller(it, extras?.getString("pkg")) }
+                Bundle()
+            }
             METHOD_PROCESS -> HookBridge.processCall(extras)
             METHOD_REPORT -> {
                 HookBridge.reportCall(extras)

@@ -34,6 +34,22 @@ class HookEntry : IXposedHookLoadPackage {
                     }
                 }
             })
+            // Announce the module as soon as the app is up. The main process is
+            // enough to prove the scope, and skipping subprocesses keeps this
+            // from waking the app for every push service.
+            if (process == pkg) {
+                val instrumentation =
+                    XposedHelpers.findClass("android.app.Instrumentation", lpparam.classLoader)
+                XposedBridge.hookAllMethods(
+                    instrumentation,
+                    "callApplicationOnCreate",
+                    object : XC_MethodHook() {
+                        override fun afterHookedMethod(param: XC_MethodHook.MethodHookParam) {
+                            runCatching { HookRemote.hello(pkg, process) }
+                        }
+                    },
+                )
+            }
             HookRemote.log("AudioRecord.read hooked in $process")
         } catch (t: Throwable) {
             HookRemote.log("hook failed in $process: $t")
