@@ -3,6 +3,7 @@ package org.voice.changer
 import android.app.Application
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.SystemClock
 import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.AndroidViewModel
@@ -10,6 +11,7 @@ import androidx.lifecycle.viewModelScope
 import org.voice.changer.audio.AudioIO
 import org.voice.changer.audio.FloatPlayer
 import org.voice.changer.audio.NoiseGate
+import org.voice.changer.audio.Recorder
 import org.voice.changer.engine.Backend
 import org.voice.changer.engine.EngineHub
 import org.voice.changer.engine.EngineInfo
@@ -21,10 +23,12 @@ import org.voice.changer.hook.HookBridge
 import org.voice.changer.hook.HookSettings
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -48,6 +52,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val loadingModel: Boolean = false,
         val importing: Boolean = false,
         val inputName: String? = null,
+        /** Whether [inputName] came from the microphone rather than a file. */
+        val inputFromMic: Boolean = false,
+        val recording: Boolean = false,
+        val recordSeconds: Double = 0.0,
+        val recordLevel: Float = 0f,
+        val playingInput: Boolean = false,
+        /** Wall-clock time spent in the last conversion, and the same as RTF. */
+        val convertWallMs: Long = 0L,
+        val convertElapsedMs: Long = 0L,
+        val rtf: Double = 0.0,
         val inputSeconds: Double = 0.0,
         val converting: Boolean = false,
         val progress: Float = 0f,
@@ -91,7 +105,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val apps: List<AppEntry> = emptyList(),
     ) {
         val ready: Boolean get() = modelName != null && !loadingModel
-        val busy: Boolean get() = loadingModel || importing || converting
+        val busy: Boolean get() = loadingModel || importing || converting || recording
         val isRvc: Boolean get() = backend == Backend.RVC
     }
 
@@ -124,6 +138,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     private val player = FloatPlayer()
+    private val recorder = Recorder()
+    private var recordJob: Job? = null
     private var input16k: FloatArray? = null
     private var output: FloatArray? = null
 
@@ -539,7 +555,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun pickAudio(uri: Uri, name: String?) {
         if (_state.value.busy || _state.value.live) return
-        _state.value = _state.value.copy(message = "Decoding audio…", error = null)
+        player.stop()
+        _state.value = _state.value.copy(
+            message = "Decoding audio…",
+            error = null,
+            playing = false,
+            playingInput = false,
+        )
         viewModelScope.launch {
             try {
                 val decoded = withContext(Dispatchers.IO) {
@@ -552,7 +574,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 _state.value = _state.value.copy(
                     inputName = decoded.third ?: "Clip",
                     inputSeconds = decoded.second,
+                    inputFromMic = false,
                     resultSeconds = 0.0,
+                    convertWallMs = 0L,
+                    convertElapsedMs = 0L,
+                    rtf = 0.0,
                     message = null,
                 )
             } catch (c: CancellationException) {
@@ -560,6 +586,79 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             } catch (t: Throwable) {
                 _state.value = _state.value.copy(message = null)
                 fail(t)
+            }
+        }
+    }
+
+    /**
+     * Records the microphone into the input slot. The samples then take the
+     * same route as a picked file, so nothing downstream knows the difference.
+     */
+    fun startRecording() {
+        val s = _state.value
+        if (s.recording || s.busy || s.live) return
+        if (!recorder.start()) {
+            showError("The microphone could not be opened")
+            return
+        }
+        player.stop()
+        _state.value = s.copy(
+            recording = true,
+            recordSeconds = 0.0,
+            recordLevel = 0f,
+            playing = false,
+            playingInput = false,
+            error = null,
+            message = null,
+        )
+        recordJob = viewModelScope.launch {
+            while (_state.value.recording && recorder.isRunning) {
+                _state.update {
+                    it.copy(recordSeconds = recorder.seconds, recordLevel = recorder.level)
+                }
+                delay(100)
+            }
+            if (_state.value.recording) stopRecording()
+        }
+    }
+
+    fun stopRecording() {
+        if (!_state.value.recording) return
+        recordJob?.cancel()
+        recordJob = null
+        val pcm = recorder.stop()
+        _state.value = _state.value.copy(recording = false, recordLevel = 0f, recordSeconds = 0.0)
+        if (pcm.size < Recorder.SAMPLE_RATE / 10) {
+            showError("The recording was too short")
+            return
+        }
+        input16k = pcm
+        output = null
+        _state.value = _state.value.copy(
+            inputName = "Mic recording",
+            inputSeconds = pcm.size / Recorder.SAMPLE_RATE.toDouble(),
+            inputFromMic = true,
+            resultSeconds = 0.0,
+            convertWallMs = 0L,
+            convertElapsedMs = 0L,
+            rtf = 0.0,
+            savedName = null,
+            error = null,
+            message = null,
+        )
+    }
+
+    /** Preview of what will be converted, before spending time on it. */
+    fun toggleInputPlay() {
+        val pcm = input16k ?: return
+        if (_state.value.playingInput) {
+            player.stop()
+            _state.value = _state.value.copy(playingInput = false)
+        } else {
+            player.stop()
+            _state.value = _state.value.copy(playing = false, playingInput = true)
+            player.play(pcm, Recorder.SAMPLE_RATE, viewModelScope) {
+                _state.value = _state.value.copy(playingInput = false)
             }
         }
     }
@@ -575,8 +674,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         player.stop()
         val rate = e.outputRate
-        _state.value = _state.value.copy(converting = true, progress = 0f, error = null, savedName = null, message = null)
+        _state.value = _state.value.copy(
+            converting = true,
+            progress = 0f,
+            convertElapsedMs = 0L,
+            playing = false,
+            playingInput = false,
+            error = null,
+            savedName = null,
+            message = null,
+        )
         viewModelScope.launch {
+            val startedAt = SystemClock.elapsedRealtime()
+            val ticker = launch {
+                while (true) {
+                    _state.update {
+                        it.copy(convertElapsedMs = SystemClock.elapsedRealtime() - startedAt)
+                    }
+                    delay(200)
+                }
+            }
             try {
                 val out = withContext(Dispatchers.Default) {
                     val p = params(_state.value)
@@ -586,14 +703,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         setThresholdDb(p.noiseGateDb)
                         process(gated)
                     }
-                    e.convert(gated) { done -> _state.value = _state.value.copy(progress = done) }
+                    e.convert(gated) { done -> _state.update { it.copy(progress = done) } }
                 }
-                Log.i("Beatrice", "converted ${out.size} samples @$rate")
+                val wall = SystemClock.elapsedRealtime() - startedAt
+                val audio = pcm.size / 16_000.0
+                val rtf = if (audio > 0) wall / 1000.0 / audio else 0.0
+                Log.i("Beatrice", "converted ${out.size} samples @$rate in ${wall} ms (RTF %.2f)".format(rtf))
                 output = out
                 _state.value = _state.value.copy(
                     converting = false,
                     outputRate = rate,
                     resultSeconds = out.size / rate.toDouble(),
+                    convertWallMs = wall,
+                    convertElapsedMs = wall,
+                    rtf = rtf,
                     message = null,
                 )
             } catch (c: CancellationException) {
@@ -602,12 +725,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             } catch (t: Throwable) {
                 _state.value = _state.value.copy(converting = false)
                 fail(t)
+            } finally {
+                ticker.cancel()
             }
         }
     }
 
     fun togglePlay() {
         val out = output ?: return
+        if (!_state.value.playing) {
+            player.stop()
+            _state.value = _state.value.copy(playingInput = false)
+        }
         if (_state.value.playing) {
             player.stop()
             _state.value = _state.value.copy(playing = false)
@@ -648,6 +777,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         player.stop()
+        recordJob?.cancel()
+        recordJob = null
+        if (recorder.isRunning) recorder.stop()
         LiveService.onLevel = null
         LiveService.onError = null
         // The engine stays in EngineHub: the live service or the next activity may still need it.

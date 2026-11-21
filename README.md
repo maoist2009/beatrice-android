@@ -38,7 +38,7 @@ debug 变体复用 release 签名，包名加 `.tmp` 后缀，可与正式包共
 | 首页 Voice Changer | 实时变声、后端切换、Xposed 开关与目标 App |
 | RVC | 音色包、pitch / protect / loudness / f0 平滑 / block-tail f0 / index / 噪声门 |
 | Beatrice | 模型、pitch / formant / intonation / pitch correction / VQ / 噪声门 |
-| Convert | 文件转换：选音频 → 转换 → 试听 / 保存 |
+| Convert | 文件转换：选音频或现场录音 → 转换 → 试听 / 保存，附 RTF |
 | About | 版本、引擎与来源说明 |
 
 五个页面是同一个 Activity 里的五个 Compose 页面（`ui/ChangerApp.kt`），共用同一个
@@ -47,13 +47,15 @@ debug 变体复用 release 签名，包名加 `.tmp` 后缀，可与正式包共
 RVC 页的音色包清单来自 `files/rvc/voices`，Beatrice 页的说话人清单来自模型的 `.toml`，
 与当前驻留的是哪个引擎无关。
 
-- **文件转换**：Convert 页选音频 → 转换 → 试听 / 保存；
+- **文件转换**：Convert 页选音频或现场录音（16 kHz 单声道，最长 2 分钟）→ 转换 →
+  试听 / 保存。结果卡显示本次的 RTF（处理耗时 ÷ 音频时长，小于 1 表示比实时快）；
 - **实时**：首页打开麦克风开关，走前台服务，锁屏和后台继续；
 - **全局变声**：本 APK 同时是 Xposed 模块。在 Xposed 管理器（如 LSPosed）里启用模块、
   勾选目标 App（scope），再打开首页的 “Use in other apps” 开关 —— 两者都满足才会转换。
 
 本地麦克风模式与 hook 模式互斥：打开实时模式会自动关掉 hook 开关，因为两者共用同一个
-有状态引擎。
+有状态引擎 —— 引擎是有状态的，两路同时喂会把彼此的上下文搅乱。想在别的 App 里用变声，
+就保持实时模式关闭、只开 hook；反过来，开着 hook 时文件转换也会被拦下。
 
 ## 模型
 
@@ -233,6 +235,7 @@ app/src/main/java/org/voice/changer/
     rvc/                                    JNI 绑定、流式适配、包存储、计时
   audio/
     AudioIO.kt / LiveEngine.kt              解码/重采样/WAV/播放，麦克风实时链路
+    Recorder.kt / NoiseGate.kt              Convert 页的现场录音、输入噪声门
     NoiseGate.kt                            输入噪声门（三条路径共用）
   hook/
     HookEntry.kt / HookAudio.kt             Xposed 入口、四种 PCM 重载的就地改写
