@@ -14,7 +14,11 @@
         </intent>
     </queries>
 
+    <!-- android:forceQueryable is only honoured for system apps (AppsFilterImpl
+         checks isSystem()); a normal install needs the pm install flag
+         force-queryable, see README. -->
     <application
+        android:forceQueryable="true"
         android:label="@string/app_name"
         android:largeHeap="true"
         android:supportsRtl="true"

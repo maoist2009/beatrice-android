@@ -27,6 +27,34 @@
 
 debug 变体复用 release 签名，包名加 `.tmp` 后缀，可与正式包共存，便于并行测试。
 
+## 安装（Xposed 通道必需）
+
+```sh
+adb install -r --force-queryable app-debug.apk
+```
+
+没有 adb 时（root）：
+
+```sh
+cat app-debug.apk | su -c "pm install -r -d --force-queryable -S $(stat -c %s app-debug.apk)"
+```
+
+**这个标志不能省。** Android 11 起 App 默认看不见别的 App，而 Xposed 模块是跑在目标
+App 的 uid 里的，它 `ContentResolver.call` 我们的 provider 时会被可见性过滤挡掉：
+
+```
+E ActivityThread: Failed to find provider info for <applicationId>.provider
+```
+
+`ContentProviderHelper.getContentProviderImpl` 里那段注释就是这件事
+（"enforce limited package visibility (introduced in Android 11)"）。目标 App 的 manifest
+我们改不了，所以只能让**我们**对所有人可见；`AppsFilterImpl` 里唯一的普通 App 口子是
+安装标志 `PackageSetting.isForceQueryableOverride()` —— manifest 里的
+`android:forceQueryable` 只对系统 App 生效。
+
+漏掉标志的表现很隐蔽：Xposed 日志里有 `AudioRecord.read hooked in <pkg>`，
+但首页状态卡里那个 App 永远 `not seen`，声音也不会变。重新安装（升级）时要再带一次。
+
 ## 使用
 
 1. 导入模型（见下文「模型」）。两套后端的模型互相独立。
@@ -202,8 +230,12 @@ AudioRecord.read  (音频线程)
 | `not seen` | **未知**：scope 没勾它、模块没启用，或者它自上次之后没被打开过 |
 
 依据只有一条：`handleLoadPackage` 只在框架判定「该进程在 scope 内」时才会被调用，模块因此
-才能向本 App 报到（`HookEntry` 在主进程的 `callApplicationOnCreate` 之后发一次 `hello`，
+才能向本 App 报到（`HookEntry` 在主进程里往主 looper 投一个 1 s 后的 `hello`，
 `HookProvider` 用调用方 uid 认包名并记下时间）。**「看见」是确定的，「没看见」永远只是未知。**
+
+心跳**没有**挂在 `callApplicationOnCreate` 上：框架加载模块的时机不保证早于 Application
+创建，实测某个目标 App 上模块是在 Application 建好之后才加载的，钩子装上去时那次调用已经
+过去，永远不触发。延迟 1 s 投递没有这个时序依赖，而且它只是状态上报，晚一秒无所谓。
 
 本进程这一行不能靠 App 自己 `Class.forName("de.robv.android.xposed.XposedBridge")`：Xposed API
 只注入到模块自己的 classloader，App 的 classloader 里没有，模块明明加载成功也照样抛
@@ -219,8 +251,9 @@ Android 11 起包名查询还会被可见性过滤 —— 按包名找管理器�
 scope 配置本身在 `/data/adb/lspd/config/modules_config.db`，只有 root 能读。
 
 - `HookProvider` 是 `exported="true"` 且没有权限保护：同机任何 App 都能调它拿到当前配置
-  或喂音频。自用没问题，分发给别人前应加 `signature|knownSigners` 级权限，或改成
-  只在模块里用 bindService 拿到的本地 socket。
+  或喂音频。自用没问题，分发给别人前应加 `signature|knownSigners` 级权限。换成
+  `bindService` 并不能降低暴露面：service 和 provider 一样受包可见性过滤，一样要靠安装时的
+  `--force-queryable`。
 
 ## 延迟
 
