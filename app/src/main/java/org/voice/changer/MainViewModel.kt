@@ -93,7 +93,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val beatriceName: String? = null,
         val beatriceSubtitle: String? = null,
         val hookEnabled: Boolean = false,
-        val hookAll: Boolean = false,
+        val hookAll: Boolean = true,
         val hookTargets: Set<String> = emptySet(),
         val hookActive: Boolean = false,
         val hookedPkg: String? = null,

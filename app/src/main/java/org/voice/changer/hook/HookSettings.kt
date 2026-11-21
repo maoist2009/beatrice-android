@@ -27,7 +27,11 @@ object HookSettings {
         prefs(context).edit().putBoolean(KEY_ENABLED, enabled).apply()
     }
 
-    fun allApps(context: Context): Boolean = prefs(context).getBoolean(KEY_ALL, false)
+    /**
+     * Default on: which apps the module is injected into is the manager's scope,
+     * so the app should not make the user tick the same list twice.
+     */
+    fun allApps(context: Context): Boolean = prefs(context).getBoolean(KEY_ALL, true)
 
     fun setAllApps(context: Context, all: Boolean) {
         prefs(context).edit().putBoolean(KEY_ALL, all).apply()

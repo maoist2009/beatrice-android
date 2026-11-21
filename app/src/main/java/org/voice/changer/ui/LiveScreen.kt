@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -35,6 +36,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -43,11 +45,13 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import org.voice.changer.MainViewModel
@@ -234,23 +238,29 @@ private fun HookCard(state: MainViewModel.UiState, vm: MainViewModel) {
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Every app", style = MaterialTheme.typography.bodyMedium)
+                    Text("Every app in scope", style = MaterialTheme.typography.bodyMedium)
                     Text(
-                        text = if (state.hookAll) "All apps except recorders" else "${state.hookTargets.size} app(s) selected",
+                        text = if (state.hookAll) "Everything the module is injected into, minus recorders"
+                        else targetsSummary(state),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
                     )
                 }
                 Switch(checked = state.hookAll, onCheckedChange = vm::setHookAll)
             }
             OutlinedButton(
                 onClick = { showTargets = true },
-                enabled = !state.hookAll && state.apps.isNotEmpty(),
-            ) { Text("Choose apps") }
+                enabled = state.apps.isNotEmpty(),
+            ) {
+                Text(
+                    if (state.hookAll) "Limit to some apps"
+                    else "Choose apps (${state.hookTargets.size})",
+                )
+            }
             Hint(
-                "Enable the “Voice Changer” module in your Xposed manager and tick " +
-                    "the same apps in its scope. This switch only decides whether " +
-                    "audio is converted.",
+                "Which apps is your Xposed manager's job: enable the module there and tick " +
+                    "the apps in its scope. This screen only narrows that down.",
             )
         }
         ModuleStatus(state)
@@ -286,6 +296,14 @@ private fun ModuleStatus(state: MainViewModel.UiState) {
         )
     }
     if (!state.hookEnabled) return
+    Text(
+        text = "To add an app:\n" +
+            "1. Enable the module and tick the app in your Xposed manager's scope.\n" +
+            "2. Open that app once — it turns “seen” below.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 6.dp),
+    )
     val rows = if (state.hookAll) {
         state.hookSeen.toList().sortedByDescending { it.second }
     } else {
@@ -320,14 +338,21 @@ private fun ModuleStatus(state: MainViewModel.UiState) {
     }
     Hint(
         if (rows.isEmpty()) {
-            "Pick the apps above, then tick the same apps in the module's scope. Nothing " +
-                "can be verified until a target has run the module at least once."
+            "Nothing has reported yet. Tick an app in the manager's scope, then open it once."
         } else {
-            "A target turns “seen” when the module has run inside it: open that app once. " +
-                "“not seen” means the scope does not include it, the module is off, or it has " +
-                "not been opened since — force-stop it, then open it again."
+            "“seen” means the module has run inside that app, so its scope is right. “not seen” " +
+                "means it is not in the scope, the module is off, or it has not been opened since."
         },
     )
+}
+
+/** The limited set, by label: what actually converts when “every app” is off. */
+private fun targetsSummary(state: MainViewModel.UiState): String {
+    if (state.hookTargets.isEmpty()) return "None picked: audio passes through untouched"
+    return state.hookTargets
+        .map { pkg -> state.apps.firstOrNull { it.pkg == pkg }?.label ?: pkg }
+        .sorted()
+        .joinToString(", ")
 }
 
 private fun ago(at: Long, now: Long): String {
@@ -342,32 +367,82 @@ private fun ago(at: Long, now: Long): String {
 
 @Composable
 private fun TargetDialog(state: MainViewModel.UiState, vm: MainViewModel, onDismiss: () -> Unit) {
+    var query by rememberSaveable { mutableStateOf("") }
+    val matches = remember(state.apps, query) {
+        val q = query.trim()
+        if (q.isEmpty()) {
+            state.apps
+        } else {
+            state.apps.filter { it.label.contains(q, true) || it.pkg.contains(q, true) }
+        }
+    }
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
         title = { Text("Apps to convert") },
         text = {
-            LazyColumn(Modifier.heightIn(max = 420.dp)) {
-                items(state.apps, key = { it.pkg }) { app ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { vm.toggleHookTarget(app.pkg) }
-                            .padding(vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Checkbox(
-                            checked = state.hookTargets.contains(app.pkg),
-                            onCheckedChange = { vm.toggleHookTarget(app.pkg) },
-                        )
-                        Column(Modifier.weight(1f)) {
-                            Text(app.label, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
-                            Text(
-                                app.pkg,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
+            Column {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    singleLine = true,
+                    placeholder = { Text("Search by name or package") },
+                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    text = if (state.hookAll) {
+                        "Ticking an app switches off “every app in scope”, so only the ticked ones convert."
+                    } else {
+                        "${state.hookTargets.size} app(s) ticked."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 6.dp),
+                )
+                if (matches.isEmpty()) {
+                    Text(
+                        text = "No app matches “${query.trim()}”.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                LazyColumn(Modifier.heightIn(max = 360.dp)) {
+                    items(matches, key = { it.pkg }) { app ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { vm.toggleHookTarget(app.pkg) }
+                                .padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Checkbox(
+                                checked = state.hookTargets.contains(app.pkg),
+                                onCheckedChange = { vm.toggleHookTarget(app.pkg) },
                             )
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    app.label,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    app.pkg,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            // Proof that the manager's scope already includes it.
+                            if (state.hookSeen.containsKey(app.pkg)) {
+                                Text(
+                                    text = "in scope",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
                         }
                     }
                 }
