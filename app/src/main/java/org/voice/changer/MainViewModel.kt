@@ -222,7 +222,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val now = _state.value.hookTargets.toMutableSet()
         if (!now.add(pkg)) now.remove(pkg)
         HookSettings.setTargets(getApplication(), now)
-        _state.value = _state.value.copy(hookTargets = now)
+        // Ticking an app is the explicit "only these" gesture, so it takes over
+        // from "every app in scope" instead of quietly doing nothing.
+        val all = if (now.isEmpty()) _state.value.hookAll else false
+        if (all != _state.value.hookAll) HookSettings.setAllApps(getApplication(), all)
+        _state.value = _state.value.copy(hookTargets = now, hookAll = all)
     }
 
     private fun loadApps(): List<AppEntry> {
