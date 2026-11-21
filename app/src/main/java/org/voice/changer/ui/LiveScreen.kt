@@ -263,8 +263,9 @@ private fun HookCard(state: MainViewModel.UiState, vm: MainViewModel) {
 /**
  * What the Xposed side actually reports, which is less than what the manager
  * shows: the framework gives a module no way to read its own enable state or
- * scope, so the app displays the two honest signals — the manager that is
- * installed, and whether the module has ever reached it from a target process.
+ * scope, so the app displays the two honest signals — the module reporting
+ * itself into this process, and whether it has ever reached the app from a
+ * target process.
  */
 @Composable
 private fun ModuleStatus(state: MainViewModel.UiState) {
@@ -277,9 +278,9 @@ private fun ModuleStatus(state: MainViewModel.UiState) {
         )
         Text(
             text = when (val api = state.moduleApiVersion) {
-                null -> "Not loaded into this app. That only means this app is not in the " +
-                    "module's scope; it says nothing about whether the module is enabled."
-                else -> "Loaded into this app (Xposed API $api): the module is enabled."
+                null -> "The module did not report itself into this app's process. That is " +
+                    "unknown, not proof that it is disabled."
+                else -> "The module is running in this app's process (Xposed API $api)."
             },
             style = MaterialTheme.typography.bodySmall,
         )

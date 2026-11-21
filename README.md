@@ -186,14 +186,22 @@ AudioRecord.read  (音频线程)
 
 | 显示 | 含义 |
 | --- | --- |
-| `Loaded into this app (Xposed API 93)` | 框架把 Xposed API 注入进了本 App 的进程：模块启用，且本 App 在 scope 里（确定） |
-| `Not loaded into this app` | **未知**。只说明本 App 不在 scope —— 模块一般不会把自己勾进 scope，这不代表模块没启用 |
+| `The module is running in this app's process (Xposed API 102)` | 模块自己在本进程里跑起来了（`HookEntry` 收到 `handleLoadPackage`）：模块启用（确定） |
+| `The module did not report itself into this app's process` | **未知**：模块没启用、框架没把模块加载进来，或者加载时报错 |
 | 目标 App 一行 `seen 2 min ago` | 该 App 的进程里模块跑过（它向本 App 报到过）：启用 + scope 都正确（确定） |
 | `not seen` | **未知**：scope 没勾它、模块没启用，或者它自上次之后没被打开过 |
 
 依据只有一条：`handleLoadPackage` 只在框架判定「该进程在 scope 内」时才会被调用，模块因此
 才能向本 App 报到（`HookEntry` 在主进程的 `callApplicationOnCreate` 之后发一次 `hello`，
 `HookProvider` 用调用方 uid 认包名并记下时间）。**「看见」是确定的，「没看见」永远只是未知。**
+
+本进程这一行不能靠 App 自己 `Class.forName("de.robv.android.xposed.XposedBridge")`：Xposed API
+只注入到模块自己的 classloader，App 的 classloader 里没有，模块明明加载成功也照样抛
+`ClassNotFoundException`。所以由模块写一个进程级标记（`System.setProperty`；系统属性是整个
+进程共享的，跨 classloader 也读得到），App 只负责读。
+
+「本进程看见」也不等于 scope 配好了：LSPosed 系框架会把模块加载进模块自己的 App（实测
+`scope` 表为空时依然如此），所以它只证明模块启用；目标 App 有没有被注入，要看下面那行心跳。
 
 App 有意**不检测 Xposed 管理器**：LSPosed 及其 fork 的管理器是模块目录里的寄生 APK
 （如 `/data/adb/modules/zygisk_vector/manager.apk`），可以隐藏、不在 `/data/app` 里，

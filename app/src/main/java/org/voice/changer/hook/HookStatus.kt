@@ -20,6 +20,30 @@ object HookStatus {
 
     private val live = ConcurrentHashMap<String, Long>()
     private val stored = ConcurrentHashMap<String, Long>()
+    /**
+     * API level the framework reported, set by [HookEntry] when it runs in this
+     * process. The app cannot check this itself: the Xposed API classes are
+     * injected into the module's classloader, not into the app's, so
+     * `Class.forName` from app code fails even when the module is loaded — and
+     * the module gets its own copy of this class, so a plain static would not
+     * be shared either.
+     */
+    private const val PROP_API = "beatrice.hook.api"
+
+    @Volatile private var moduleApi: Int? = null
+
+    fun markLoaded(api: Int) {
+        moduleApi = api
+        // The module's classes are loaded by the framework's classloader, which
+        // is a *different* class with its own statics, so the marker has to go
+        // through something the whole process shares: the system properties.
+        runCatching { System.setProperty(PROP_API, api.toString()) }
+    }
+
+    /** API level of the framework in this process, or null when it did not load here. */
+    fun loadedApi(): Int? = moduleApi
+        ?: runCatching { System.getProperty(PROP_API)?.toIntOrNull() }.getOrNull()
+
     /** uid -> package, so a once-per-second config call does not hit the PM every time. */
     private val uidPackage = ConcurrentHashMap<Int, String>()
 
@@ -49,7 +73,12 @@ object HookStatus {
         val previous = live.put(pkg, now)
         if (previous != null && now - previous < WRITE_EVERY_MS) return
         stored[pkg] = now
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putLong(pkg, now).apply()
+        // Synchronous on purpose: this runs on a binder thread at most once a
+        // minute per package, and a status card that forgets across restarts is
+        // worse than a few milliseconds of that thread.
+        runCatching {
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putLong(pkg, now).commit()
+        }.onFailure { android.util.Log.i("hook_status", "prefs failed for $pkg: $it") }
     }
 
     /** package -> last time that package asked us for configuration. */

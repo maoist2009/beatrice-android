@@ -44,6 +44,7 @@ class HookProvider : ContentProvider() {
             // targets the framework really loads, before any audio flows.
             METHOD_HELLO -> {
                 context?.let { HookStatus.touchCaller(it, extras?.getString("pkg")) }
+                Log.i(TAG, "hello from ${extras?.getString("process")}, seen=${HookStatus.seen(requireNotNull(context)).keys}")
                 Bundle()
             }
             METHOD_PROCESS -> HookBridge.processCall(extras)

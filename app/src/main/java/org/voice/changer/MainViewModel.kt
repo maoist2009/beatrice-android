@@ -22,7 +22,7 @@ import org.voice.changer.engine.rvc.RvcStore
 import org.voice.changer.hook.HookBridge
 import org.voice.changer.hook.HookSettings
 import org.voice.changer.hook.HookStatus
-import org.voice.changer.hook.XposedSelf
+
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -160,8 +160,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             attachLiveCallbacks()
         }
         refreshAvailability()
-        val api = XposedSelf.apiVersion()
-        Log.i("Beatrice", "xposed: api=$api (null = not scoped into this app)")
+        val api = HookStatus.loadedApi()
+        Log.i("Beatrice", "xposed: moduleApi=$api (null = the module did not load here)")
         _state.value = _state.value.copy(moduleApiVersion = api)
         if (ModelLoader.isModelDir(beatriceDir) || store.isInstalled()) loadEngine()
         watchHook()
@@ -188,6 +188,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     hookQueueMs = stats?.queueMs ?: 0,
                     hookInferMs = stats?.inferMs ?: 0.0,
                     hookSeen = HookStatus.seen(getApplication()),
+                    moduleApiVersion = HookStatus.loadedApi(),
                 )
                 delay(1_000)
             }

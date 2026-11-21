@@ -1,5 +1,6 @@
 package org.voice.changer.hook
 
+import android.util.Log
 import org.voice.changer.BuildConfig
 import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.XC_MethodHook
@@ -19,8 +20,36 @@ import java.util.concurrent.ConcurrentHashMap
 class HookEntry : IXposedHookLoadPackage {
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
         val pkg = lpparam.packageName ?: return
-        if (pkg == BuildConfig.APPLICATION_ID) return
         val process = lpparam.processName ?: pkg
+        // First thing, before any filtering: the fact that this runs at all is
+        // the proof the app's status card shows, and the only way the app can
+        // learn it (the API classes are not visible from the app's classloader).
+        // Reflected: the compile-only stub does not carry every framework member.
+        val api = runCatching {
+            XposedBridge::class.java.getMethod("getXposedVersion").invoke(null) as Int
+        }.getOrNull()
+        if (api != null) {
+            runCatching { HookStatus.markLoaded(api) }
+            Log.i("beatrice-hook", "entry loaded in $process (api $api)")
+        }
+        // Announce the module at app start, main process only: enough to prove
+        // the scope, and subprocesses would wake the app for every push service.
+        if (process == pkg) {
+            runCatching {
+                val instrumentation =
+                    XposedHelpers.findClass("android.app.Instrumentation", lpparam.classLoader)
+                XposedBridge.hookAllMethods(
+                    instrumentation,
+                    "callApplicationOnCreate",
+                    object : XC_MethodHook() {
+                        override fun afterHookedMethod(param: XC_MethodHook.MethodHookParam) {
+                            runCatching { HookRemote.hello(pkg, pkg) }
+                        }
+                    },
+                )
+            }
+        }
+        if (pkg == BuildConfig.APPLICATION_ID) return
         if (SKIP.containsMatchIn(process)) return
         if (!installed.add(process)) return
         try {
@@ -34,22 +63,6 @@ class HookEntry : IXposedHookLoadPackage {
                     }
                 }
             })
-            // Announce the module as soon as the app is up. The main process is
-            // enough to prove the scope, and skipping subprocesses keeps this
-            // from waking the app for every push service.
-            if (process == pkg) {
-                val instrumentation =
-                    XposedHelpers.findClass("android.app.Instrumentation", lpparam.classLoader)
-                XposedBridge.hookAllMethods(
-                    instrumentation,
-                    "callApplicationOnCreate",
-                    object : XC_MethodHook() {
-                        override fun afterHookedMethod(param: XC_MethodHook.MethodHookParam) {
-                            runCatching { HookRemote.hello(pkg, process) }
-                        }
-                    },
-                )
-            }
             HookRemote.log("AudioRecord.read hooked in $process")
         } catch (t: Throwable) {
             HookRemote.log("hook failed in $process: $t")

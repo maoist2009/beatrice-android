@@ -85,13 +85,17 @@ object HookRemote {
     fun hello(pkg: String, process: String) {
         Thread {
             try {
-                val ctx = context() ?: return@Thread
+                val ctx = context() ?: return@Thread.also {
+                    android.util.Log.i(TAG, "hello skipped: no context yet")
+                }
                 ctx.contentResolver.call(uri, "hello", null, Bundle().apply {
                     putString("pkg", pkg)
                     putString("process", process)
                 })
+                android.util.Log.i(TAG, "hello sent for $process")
             } catch (t: Throwable) {
                 // The app is not running; nothing to report to.
+                android.util.Log.i(TAG, "hello failed for $process: $t")
             }
         }.apply { isDaemon = true }.start()
     }
