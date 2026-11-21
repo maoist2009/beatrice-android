@@ -127,6 +127,13 @@ private fun unescape(s: String): String {
     return sb.toString()
 }
 
+/** What the UI needs to label a model without loading its weights. */
+data class ModelSummary(
+    val name: String,
+    val version: String,
+    val voices: List<String>,
+)
+
 object ModelLoader {
     const val SUPPORTED_VERSION = "2.0.0-rc.0"
 
@@ -140,16 +147,22 @@ object ModelLoader {
         dir.listFiles()?.firstOrNull { it.isFile && it.name.endsWith(".toml", ignoreCase = true) }
 
     /**
-     * Name and version from the .toml alone. The UI needs to label a model
-     * that is installed but not the resident engine, and loading the weights
-     * just to read a string would cost a second and 300 MB.
+     * Name, version and voice names from the .toml alone. The UI needs to
+     * label a model that is installed but not the resident engine, and
+     * loading the weights just to read a few strings would cost a second and
+     * 300 MB.
      */
-    fun describe(dir: File): Pair<String, String>? = runCatching {
+    fun describe(dir: File): ModelSummary? = runCatching {
         val toml = findToml(dir)?.readText() ?: return null
-        val model = parseToml(toml)["model"] ?: return null
+        val parsed = parseToml(toml)
+        val model = parsed["model"] ?: return null
         val name = model["name"] as? String ?: "Beatrice"
         val version = model["version"] as? String ?: SUPPORTED_VERSION
-        name to version
+        val voices = parsed.mapNotNull { (section, table) ->
+            val m = Regex("^voice\\.(\\d+)$").find(section) ?: return@mapNotNull null
+            m.groupValues[1].toInt() to (table["name"] as? String ?: "Voice ${m.groupValues[1]}")
+        }.sortedBy { it.first }.map { it.second }
+        ModelSummary(name, version, voices)
     }.getOrNull()
 
     fun isModelDir(dir: File): Boolean =

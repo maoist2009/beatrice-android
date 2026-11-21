@@ -43,7 +43,9 @@ debug 变体复用 release 签名，包名加 `.tmp` 后缀，可与正式包共
 
 五个页面是同一个 Activity 里的五个 Compose 页面（`ui/ChangerApp.kt`），共用同一个
 `MainViewModel`：在任一页改的参数在其它页立刻可见，转换或播放切页也不会中断。
-只有 RVC 音色包和 Beatrice 模型这两类文件是分开导入的。
+只有 RVC 音色包和 Beatrice 模型这两类文件是分开导入的。每页也只列本后端的模型和音色：
+RVC 页的音色包清单来自 `files/rvc/voices`，Beatrice 页的说话人清单来自模型的 `.toml`，
+与当前驻留的是哪个引擎无关。
 
 - **文件转换**：Convert 页选音频 → 转换 → 试听 / 保存；
 - **实时**：首页打开麦克风开关，走前台服务，锁屏和后台继续；

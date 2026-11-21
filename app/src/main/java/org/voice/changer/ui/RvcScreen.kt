@@ -19,7 +19,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
@@ -63,16 +62,16 @@ fun RvcScreen(vm: MainViewModel, onNavigate: (Page) -> Unit) {
             onLoad = { vm.setBackend(Backend.RVC) },
         )
 
-        if (state.ready && state.voices.isNotEmpty()) {
+        if (state.rvcVoices.isNotEmpty()) {
             SectionCard(title = "Voice pack") {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    state.voices.forEachIndexed { i, name ->
-                        val hasIndex = state.voiceHasIndex.getOrNull(i) == true
+                    state.rvcVoices.forEachIndexed { i, name ->
+                        val hasIndex = state.rvcVoiceHasIndex.getOrNull(i) == true
                         FilterChip(
-                            selected = state.voice == i,
-                            onClick = { vm.setVoice(i) },
+                            selected = state.rvcSelected == i,
+                            onClick = { vm.selectRvcVoice(i) },
                             label = { Text(if (hasIndex) "$name · index" else name) },
-                            leadingIcon = if (state.voice == i) {
+                            leadingIcon = if (state.rvcSelected == i) {
                                 {
                                     Icon(
                                         Icons.Filled.Check,
@@ -84,7 +83,11 @@ fun RvcScreen(vm: MainViewModel, onNavigate: (Page) -> Unit) {
                         )
                     }
                 }
-                Hint("“· index” marks a pack that ships a retrieval index; see Index rate below.")
+                Hint(
+                    if (state.isRvc) "“· index” marks a pack that ships a retrieval index; " +
+                        "see Index rate below."
+                    else "The selected pack is loaded when you switch to RVC."
+                )
             }
         }
 
@@ -244,7 +247,7 @@ private fun RvcParams(state: MainViewModel.UiState, vm: MainViewModel) {
 
             HorizontalDivider(Modifier.padding(vertical = 6.dp))
 
-            val hasIndex = state.voiceHasIndex.getOrNull(state.voice) == true
+            val hasIndex = state.rvcVoiceHasIndex.getOrNull(state.rvcSelected) == true
             ParamSlider(
                 "Index rate",
                 if (state.indexRate <= 0f) "off" else "%.2f".format(state.indexRate),

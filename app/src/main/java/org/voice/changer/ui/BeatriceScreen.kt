@@ -4,12 +4,18 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -23,6 +29,7 @@ import org.voice.changer.engine.Backend
 import kotlin.math.roundToInt
 
 /** Beatrice page: the CPU backend, its model and its own tunables. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun BeatriceScreen(vm: MainViewModel, onNavigate: (Page) -> Unit) {
     val state by vm.state.collectAsState()
@@ -43,6 +50,33 @@ fun BeatriceScreen(vm: MainViewModel, onNavigate: (Page) -> Unit) {
             onImport = { folderPicker.launch(null) },
             onLoad = { vm.setBackend(Backend.BEATRICE) },
         )
+
+        if (state.beatriceVoices.isNotEmpty()) {
+            SectionCard(title = "Voice") {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    state.beatriceVoices.forEachIndexed { i, name ->
+                        FilterChip(
+                            selected = state.beatriceSelected == i,
+                            onClick = { vm.selectBeatriceVoice(i) },
+                            label = { Text(name) },
+                            leadingIcon = if (state.beatriceSelected == i) {
+                                {
+                                    Icon(
+                                        Icons.Filled.Check,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                }
+                            } else null,
+                        )
+                    }
+                }
+                Hint(
+                    if (state.isRvc) "The selected voice applies when you switch to Beatrice."
+                    else "Switching voices is a parameter change: the model stays loaded."
+                )
+            }
+        }
 
         if (state.ready && !state.isRvc) {
             BeatriceParams(state, vm)

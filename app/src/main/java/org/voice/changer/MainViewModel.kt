@@ -37,8 +37,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val backend: Backend? = null,
         val modelName: String? = null,
         val modelVersion: String? = null,
-        val voices: List<String> = emptyList(),
-        val voice: Int = 0,
+        /** RVC packs on disk, whether or not RVC is the resident engine. */
+        val rvcVoices: List<String> = emptyList(),
+        val rvcVoiceHasIndex: List<Boolean> = emptyList(),
+        val rvcSelected: Int = 0,
+        /** Beatrice rc.0 speakers, from the model's .toml. */
+        val beatriceVoices: List<String> = emptyList(),
+        val beatriceSelected: Int = 0,
         val outputRate: Int = 24_000,
         val loadingModel: Boolean = false,
         val importing: Boolean = false,
@@ -66,8 +71,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val indexRate: Float = 0f,
         val nprobe: Int = 0,
         val noiseGate: Float = -50f,
-        /** Parallel to [voices]: whether that pack ships a retrieval index. */
-        val voiceHasIndex: List<Boolean> = emptyList(),
         /** Labels for the backend that is not resident, read from disk. */
         val rvcName: String? = null,
         val rvcSubtitle: String? = null,
@@ -97,7 +100,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _state = MutableStateFlow(
         UiState(
-            voice = prefs.getInt("voice", 0),
+            beatriceSelected = prefs.getInt("voice", 0),
             pitch = prefs.getFloat("pitch", 0f),
             formant = prefs.getFloat("formant", 0f),
             intonation = prefs.getFloat("intonation", 1f),
@@ -221,7 +224,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         formantShift = s.formant.toDouble(),
         intonationIntensity = s.intonation.toDouble(),
         pitchCorrection = s.correction.toDouble(),
-        speaker = s.voice,
+        speaker = s.beatriceSelected,
         vqNeighbors = s.vq,
         outputGain = s.output.toDouble(),
         rmsMixRate = s.rmsMix.toDouble(),
@@ -338,19 +341,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private fun refreshAvailability() {
         val hasBeatrice = ModelLoader.isModelDir(beatriceDir)
         val beatrice = if (hasBeatrice) ModelLoader.describe(beatriceDir) else null
-        val hasRvc = runCatching { store.sharedReady() && store.voices().isNotEmpty() }
-            .getOrDefault(false)
-        val packs = if (hasRvc) runCatching { store.voices() }.getOrDefault(emptyList()) else emptyList()
+        val packs = runCatching { store.voices() }.getOrDefault(emptyList())
+        val hasRvc = runCatching { store.sharedReady() }.getOrDefault(false) && packs.isNotEmpty()
         // The pack the engine will stage: the last one used, else the first.
-        val selected = packs.firstOrNull { it.name == prefs.getString("rvcVoice", null) }
-            ?: packs.firstOrNull()
+        val selected = packs.indexOfFirst { it.name == prefs.getString("rvcVoice", null) }
+            .takeIf { it >= 0 } ?: 0
+        val beatriceSelected = prefs.getInt("voice", 0)
+            .coerceIn(0, (beatrice?.voices?.size ?: 0).coerceAtLeast(1) - 1)
         _state.value = _state.value.copy(
             hasBeatrice = hasBeatrice,
             hasRvc = hasRvc,
-            beatriceName = beatrice?.first,
-            beatriceSubtitle = beatrice?.let { "${it.second} · on-device CPU" },
-            rvcName = selected?.name,
-            rvcSubtitle = selected?.let { if (it.hasIndex) "RVC v2 · Hexagon NPU · index" else "RVC v2 · Hexagon NPU" },
+            beatriceName = beatrice?.name,
+            beatriceSubtitle = beatrice?.let { "${it.version} · on-device CPU" },
+            beatriceVoices = beatrice?.voices ?: emptyList(),
+            beatriceSelected = beatriceSelected,
+            rvcVoices = packs.map { it.name },
+            rvcVoiceHasIndex = packs.map { it.hasIndex },
+            rvcSelected = selected,
+            rvcName = packs.getOrNull(selected)?.name,
+            rvcSubtitle = packs.getOrNull(selected)?.let {
+                if (it.hasIndex) "RVC v2 · Hexagon NPU · index" else "RVC v2 · Hexagon NPU"
+            },
         )
     }
 
@@ -371,19 +382,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun adopt(processor: LiveProcessor, info: EngineInfo) {
         Log.i("Beatrice", "engine ready: ${info.backend} ${info.name} @${info.outputRate}")
-        val packs = if (info.backend == Backend.RVC) store.voices() else emptyList()
-        val voices = if (info.backend == Backend.RVC) {
-            packs.map { it.name }.ifEmpty { info.voices }
-        } else info.voices
-        val index = when {
-            info.backend == Backend.RVC -> voices.indexOf(info.name).coerceAtLeast(0)
-            _state.value.voice in voices.indices -> _state.value.voice
-            else -> 0
-        }
-        if (info.backend == Backend.RVC) {
-            prefs.edit().putString("rvcVoice", info.name).apply()
-        }
         val isRvc = info.backend == Backend.RVC
+        val packs = runCatching { store.voices() }.getOrDefault(emptyList())
+        val rvcVoices = packs.map { it.name }.ifEmpty { if (isRvc) info.voices else emptyList() }
+        val rvcSelected = rvcVoices.indexOf(info.name).takeIf { it >= 0 } ?: 0
+        val bVoices = if (isRvc) _state.value.beatriceVoices else info.voices
+        val bSelected = prefs.getInt("voice", 0).coerceIn(0, bVoices.size.coerceAtLeast(1) - 1)
+        if (isRvc) prefs.edit().putString("rvcVoice", info.name).apply()
         _state.value = _state.value.copy(
             backend = info.backend,
             modelName = info.name,
@@ -392,9 +397,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             rvcSubtitle = if (isRvc) info.subtitle else _state.value.rvcSubtitle,
             beatriceName = if (isRvc) _state.value.beatriceName else info.name,
             beatriceSubtitle = if (isRvc) _state.value.beatriceSubtitle else info.subtitle,
-            voices = voices,
-            voiceHasIndex = voices.map { name -> packs.firstOrNull { it.name == name }?.hasIndex == true },
-            voice = index,
+            rvcVoices = rvcVoices,
+            rvcVoiceHasIndex = rvcVoices.map { name -> packs.firstOrNull { it.name == name }?.hasIndex == true },
+            rvcSelected = rvcSelected,
+            beatriceVoices = bVoices,
+            beatriceSelected = bSelected,
             outputRate = info.outputRate,
             loadingModel = false,
             message = null,
@@ -402,40 +409,43 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         applyParams()
     }
 
-    /** Switches voice: a parameter change for rc.0, an engine reload for RVC. */
-    fun setVoice(index: Int) {
+    /** RVC: stages the pack; swapping it needs a reload, so ask for one. */
+    fun selectRvcVoice(index: Int) {
         val s = _state.value
-        if (index !in s.voices.indices || s.busy || s.live) return
-        if (s.backend == Backend.RVC) {
-            val voices = store.voices()
-            val target = voices.firstOrNull { it.name == s.voices[index] } ?: return
-            if (target.name == s.modelName) {
-                _state.value = s.copy(voice = index)
-                return
-            }
-            _state.value = s.copy(loadingModel = true, voice = index, message = "Loading ${target.name}…")
-            viewModelScope.launch {
-                try {
-                    val info = withContext(Dispatchers.Default) {
-                        EngineHub.ensureRvc(
-                            store, target,
-                            getApplication<Application>().applicationInfo.nativeLibraryDir,
-                            params(_state.value),
-                        )
-                    }
-                    val created = EngineHub.processor ?: error("The engine could not be created")
-                    adopt(created, info)
-                } catch (c: CancellationException) {
-                    throw c
-                } catch (t: Throwable) {
-                    _state.value = _state.value.copy(loadingModel = false, message = null)
-                    fail(t)
+        val name = s.rvcVoices.getOrNull(index) ?: return
+        if (s.busy || s.live) return
+        prefs.edit().putString("rvcVoice", name).apply()
+        _state.value = s.copy(rvcSelected = index)
+        if (s.backend != Backend.RVC || s.modelName == name) return
+        val target = runCatching { store.voices() }.getOrDefault(emptyList())
+            .firstOrNull { it.name == name } ?: return
+        _state.value = _state.value.copy(loadingModel = true, message = "Loading $name…")
+        viewModelScope.launch {
+            try {
+                val info = withContext(Dispatchers.Default) {
+                    EngineHub.ensureRvc(
+                        store, target,
+                        getApplication<Application>().applicationInfo.nativeLibraryDir,
+                        params(_state.value),
+                    )
                 }
+                val created = EngineHub.processor ?: error("The engine could not be created")
+                adopt(created, info)
+            } catch (c: CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                _state.value = _state.value.copy(loadingModel = false, message = null)
+                fail(t)
             }
-        } else {
-            _state.value = s.copy(voice = index)
-            applyParams()
         }
+    }
+
+    /** Beatrice: the rc.0 speaker is a parameter, not a reload. */
+    fun selectBeatriceVoice(index: Int) {
+        val s = _state.value
+        if (index !in s.beatriceVoices.indices || s.busy || s.live) return
+        _state.value = s.copy(beatriceSelected = index)
+        applyParams()
     }
 
     // ------------------------------------------------------------- params
@@ -476,7 +486,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         EngineHub.processor?.setParams(p)
         LiveService.updateParams(p)
         prefs.edit()
-            .putInt("voice", s.voice)
+            .putInt("voice", s.beatriceSelected)
             .putFloat("pitch", s.pitch)
             .putFloat("formant", s.formant)
             .putFloat("intonation", s.intonation)
