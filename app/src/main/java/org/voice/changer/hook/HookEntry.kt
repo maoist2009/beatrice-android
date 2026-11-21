@@ -1,5 +1,7 @@
 package org.voice.changer.hook
 
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import org.voice.changer.BuildConfig
 import de.robv.android.xposed.IXposedHookLoadPackage
@@ -37,22 +39,17 @@ class HookEntry : IXposedHookLoadPackage {
             runCatching { HookStatus.markLoaded(api) }
             Log.i("beatrice-hook", "entry loaded in $process (api $api)")
         }
-        // Announce the module at app start, main process only: enough to prove
-        // the scope, and subprocesses would wake the app for every push service.
+        // Announce the module once, main process only: enough to prove the
+        // scope, and subprocesses would wake the app for every push service.
+        // Hooking callApplicationOnCreate looked tidier but is a race the
+        // framework wins on some apps: it loads modules *after* the Application
+        // already exists there, so the hook never fires and the app never hears
+        // from that process. Posting to the main looper has no such dependency.
         if (process == pkg) {
-            runCatching {
-                val instrumentation =
-                    XposedHelpers.findClass("android.app.Instrumentation", lpparam.classLoader)
-                XposedBridge.hookAllMethods(
-                    instrumentation,
-                    "callApplicationOnCreate",
-                    object : XC_MethodHook() {
-                        override fun afterHookedMethod(param: XC_MethodHook.MethodHookParam) {
-                            runCatching { HookRemote.hello(pkg, pkg) }
-                        }
-                    },
-                )
-            }
+            Handler(Looper.getMainLooper()).postDelayed(
+                { runCatching { HookRemote.hello(pkg, pkg) } },
+                1_000,
+            )
         }
         if (pkg == BuildConfig.APPLICATION_ID) return
         if (!installed.add(process)) return
